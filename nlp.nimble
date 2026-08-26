@@ -1,6 +1,6 @@
 version       = "0.1.0"
-author        = "nlp contributors"
-description   = "Natural language processing toolkit for Nim"
+author        = "cheeseonamonkey"
+description   = "Dependency-free NLP toolkit for Nim: tokenization, normalization, stemming, TF-IDF, BM25, and text analysis"
 license       = "MIT"
 srcDir        = "src"
 

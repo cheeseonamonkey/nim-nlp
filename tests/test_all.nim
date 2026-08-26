@@ -696,6 +696,11 @@ proc testTypes() =
   assert v.get(0) == 1.5, "sparse set/get"
   assert v.get(1) == 2.5, "sparse set/get 2"
   assert v.get(999) == 0.0, "sparse get missing"
+  v.set(-1, 4.0)
+  v.set(2, 0.0 / 0.0)
+  assert v.len == 2, "sparse rejects invalid values"
+  assert v.get(-1) == 0.0, "sparse rejects invalid index"
+  assert v.get(2) == 0.0, "sparse rejects NaN"
   assert v.len == 2, "sparse len"
 
   # SparseVector - clear

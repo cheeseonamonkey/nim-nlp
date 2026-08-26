@@ -8,7 +8,7 @@ It is implemented in pure Nim and targets Nim 2.x.
 
 ## Features
 
-- Word, whitespace, sentence, pattern, and Unicode character n-gram tokenizers
+- Word, whitespace, sentence, simple-pattern, and Unicode character n-gram tokenizers
 - Lowercasing, accent stripping, whitespace, punctuation, and number normalization
 - English, Spanish, French, and German stopwords
 - Porter and irregular-form-aware smart stemming
@@ -87,6 +87,10 @@ frequency data varies by corpus and language variety.
 ```bash
 nimble test
 ```
+
+Contributions are welcome. Please keep the library dependency-free, add tests
+for behavior changes, and run `nimble check` and `nimble test` before opening a
+pull request.
 
 The public module is named `nlp`; TF-IDF remains available through APIs such as
 `fitTfidf`, `transformTfidf`, and `searchTfidf`.

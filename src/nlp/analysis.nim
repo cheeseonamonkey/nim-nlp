@@ -7,7 +7,7 @@
 ## - Text statistics
 ## - Keyword extraction
 
-import std/[tables, math, algorithm, sets, sequtils]
+import std/[tables, math, algorithm, sets, sequtils, strutils]
 
 # ============================================================
 # Frequency analysis
@@ -111,7 +111,8 @@ proc textStats*(tokens: seq[string]): TextStats =
   var maxFreq = 0
   for term, freq in freqs:
     if freq == 1: result.hapaxLegomena.inc
-    if freq > maxFreq:
+    if freq > maxFreq or (freq == maxFreq and
+        (result.topTerm.len == 0 or term < result.topTerm)):
       maxFreq = freq
       result.topTerm = term
 
@@ -137,7 +138,7 @@ proc extractKeywords*(
   ## - `"freq"`: Simple frequency-based extraction
   if documents.len == 0 or topN <= 0:
     return newSeq[(string, float)]()
-  case methodName:
+  case methodName.toLowerAscii():
   of "tfidf":
     let df = documentFrequency(documents)
     let n = documents.len.float

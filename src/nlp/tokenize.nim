@@ -19,8 +19,9 @@ type
     minLength*: int
 
   PatternTokenizer* = object
-    ## Extracts tokens matching a simple pattern.
-    ## Supports: \w+ (alphanumeric), \d+ (digits), [chars] (character class)
+    ## Extracts tokens matching a small, regex-like pattern subset.
+    ## Supports: \w+ (alphanumeric), \d+ (digits), \s+ (whitespace),
+    ## and [chars] (character class). This is not a general regex engine.
     pattern*: string
     lowercase*: bool
     minLength*: int

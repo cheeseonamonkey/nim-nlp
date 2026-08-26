@@ -25,7 +25,10 @@ proc newSparseVector*(): SparseVector =
   SparseVector(data: initTable[int, float]())
 
 proc set*(v: var SparseVector, idx: int, val: float) =
-  ## Set a value; inserting 0 removes the entry.
+  ## Set a value; zero and invalid indices remove/ignore entries.
+  ## NaN is ignored so it cannot poison later similarity calculations.
+  if idx < 0 or val != val:
+    return
   if val == 0.0:
     v.data.del(idx)
   else:
