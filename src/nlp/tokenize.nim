@@ -125,7 +125,7 @@ proc tokenize*(t: SentenceTokenizer, text: string): seq[string] =
           let stripped = current.strip()
           if stripped.len > 0: result.add(stripped)
         else:
-          if current.len > 0: result.add(current)
+          if current.len > 0: result.add(current.strip())
         current.setLen(0)
     inc i
   if current.len > 0:
@@ -133,7 +133,7 @@ proc tokenize*(t: SentenceTokenizer, text: string): seq[string] =
     if t.discardEmpty:
       if stripped.len > 0: result.add(stripped)
     else:
-      result.add(current)
+      result.add(stripped)
 
 # ============================================================
 # N-grams from token sequences

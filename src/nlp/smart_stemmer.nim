@@ -83,9 +83,8 @@ proc detectPlural(w: string): string =
     return irregularPlurals[w]
 
   # Words that don't change in plural
-  for npcw in noChangeWords:
-    if w == npcw:
-      return w
+  if w in noChangeWords:
+    return w
 
   # Pattern-based plural handling (longest suffix first)
 
@@ -112,14 +111,7 @@ proc detectPlural(w: string): string =
 
   # -oes → -o (heroes → hero, potatoes → potato)
   if w.endsWith("oes") and w.len > 4:
-    let stem = w[0..^3]
-    if stem.endsWith("potat") or stem.endsWith("tomat") or stem.endsWith("her") or
-       stem.endsWith("ech") or stem.endsWith("v") or stem.endsWith("domin") or
-       stem.endsWith("tuxed") or stem.endsWith("stilet") or stem.endsWith("manifest") or
-       stem.endsWith("ghett") or stem.endsWith("infern") or stem.endsWith("tatt") or
-       stem.endsWith("buffal") or stem.endsWith("mosquit"):
-      return stem
-    return stem
+    return w[0..^3]
 
   # -ches/-shes/-xes/-zes/-sses → remove -es
   if w.endsWith("ches") or w.endsWith("shes") or w.endsWith("xes") or
@@ -161,9 +153,8 @@ proc stem*(s: SmartStemmer, word: string): string =
     return irregularVerbs[w]
 
   # Words that don't change
-  for npcw in noChangeWords:
-    if w == npcw:
-      return w
+  if w in noChangeWords:
+    return w
 
   # Handle plurals first
   result = detectPlural(w)

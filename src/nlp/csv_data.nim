@@ -12,3 +12,4 @@ proc csvRows*(data, filename: string): seq[seq[string]] =
   while parser.readRow():
     result.add(parser.row)
   parser.close()
+  stream.close()

@@ -9,12 +9,14 @@ It is implemented in pure Nim and targets Nim 2.x.
 ## Features
 
 - Word, whitespace, sentence, simple-pattern, and Unicode character n-gram tokenizers
-- Lowercasing, accent stripping, whitespace, punctuation, and number normalization
+- Lowercasing, accent stripping, whitespace, punctuation, number, HTML, URL, and email normalization
 - English, Spanish, French, and German stopwords
 - Porter and irregular-form-aware smart stemming
 - Term/document frequencies, statistics, keywords, and similarity measures
+- Bag-of-words / CountVectorizer with cosine search
 - TF-IDF vectorization and cosine search
 - BM25 retrieval with configurable `k1` and `b`
+- LDA topic modeling (collapsed Gibbs) with perplexity and coherence (UMass / c_v)
 - Sparse vectors and vocabularies
 - CSV-maintained linguistic data embedded at compile time
 - No runtime data files and no external runtime dependencies
@@ -56,6 +58,22 @@ let tokens = "The quick brown foxes jumped"
 
 let normalized = "  Café 42  ".normalizeStripAccents()
 # "  Cafe 42  "
+
+let cleaned = "Hi <b>Bob</b>, see https://example.com or bob@example.com".normalizeStripHtml()
+  .normalizeReplaceUrls()
+  .normalizeReplaceEmails()
+# "Hi Bob, see <url> or <email>"
+
+let bow = fitCounts(documents)
+let bowResults = bow.searchCounts(wordTokenize("cat mat"))
+
+let lda = fitLda(documents, numTopics = 2, seed = 42)
+let topics = lda.topTerms(0, n = 5)                # phi-ranked labeling
+let topicsPmi = lda.topTermsByPMI(documents, 0, 5) # PMI-reranked labeling
+let ppl = lda.perplexity()                          # training perplexity
+let umass = lda.coherenceUMass(documents)           # UMass coherence
+let cv = lda.coherenceCV(documents)                 # c_v coherence (PMI)
+let dist = lda.transformLda(wordTokenize("cats and pets")) # fold-in for unseen doc
 ```
 
 ## Analysis

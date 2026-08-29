@@ -87,7 +87,11 @@ proc testTokenizers() =
 
   # Sentence tokenizer - don't discard empty
   let t7c = splitSentences("Hello. ", discardEmpty = false)
-  assert "Hello." in t7c, "splitSentences keep content"
+  assert t7c == @["Hello.", ""], "splitSentences keep empty trailing content"
+  assert splitSentences("", discardEmpty = false) == @[""],
+    "splitSentences keep empty input"
+  assert splitSentences("  Hello.  Next!  ", discardEmpty = false) ==
+    @["Hello.", "Next!", ""], "splitSentences strip when keeping empty content"
 
   # Pattern tokenizer
   let t8 = PatternTokenizer(pattern: r"\w+", lowercase: true, minLength: 1).tokenize("Hello, World!")
@@ -475,6 +479,7 @@ proc testSmartStemmer() =
   assert smartStemWord("deer") == "deer", "deer -> deer"
   assert smartStemWord("fish") == "fish", "fish -> fish"
   assert smartStemWord("moose") == "moose", "moose -> moose"
+  assert smartStemWord("SHEEP") == "sheep", "uppercase no-change word -> sheep"
   assert smartStemWord("trout") == "trout", "trout -> trout"
   assert smartStemWord("salmon") == "salmon", "salmon -> salmon"
   assert smartStemWord("series") == "series", "series -> series"
@@ -683,6 +688,22 @@ proc testEmbeddings() =
   echo "  ALL PASS"
 
 # ============================================================
+# Count vectorizer tests
+# ============================================================
+
+proc testCounts() =
+  echo "\n=== Count Vectorizer ==="
+
+  let model = fitCounts(@[@["cat", "cat"], @["dog"]])
+  assert model.numDocs == 2, "count model numDocs"
+  let vector = model.transformCounts(@["cat", "unknown"])
+  assert vector.get(model.vocabulary.id("cat")) == 1.0, "count transform"
+  let results = model.searchCounts(@["cat"])
+  assert results == @[(0, 1.0)], "count search"
+
+  echo "  ALL PASS"
+
+# ============================================================
 # Types / Vocabulary tests
 # ============================================================
 
@@ -764,5 +785,6 @@ testPorterStemmer()
 testSmartStemmer()
 testAnalysis()
 testEmbeddings()
+testCounts()
 testTypes()
 echo "\n=== ALL TESTS PASSED ==="
