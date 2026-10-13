@@ -186,6 +186,27 @@ proc urlLenFrom(text: string, i: int): int =
     dec j
   j - i
 
+proc urlSpanAt(text: string, i: int): int =
+  ## Length of a URL starting exactly at `i`, or 0 if none starts there.
+  if isUrlStart(text, i): urlLenFrom(text, i) else: 0
+
+proc replaceSpans(
+  text, repl: string, spanAt: proc(text: string, i: int): int {.nimcall.}
+): string =
+  ## Walk `text`; whenever `spanAt` reports a non-zero span at the current
+  ## position, emit `repl` and skip the span, else emit the character.
+  if text.len == 0: return ""
+  result = newStringOfCap(text.len + repl.len)
+  var i = 0
+  while i < text.len:
+    let span = spanAt(text, i)
+    if span > 0:
+      result.add(repl)
+      i += span
+    else:
+      result.add(text[i])
+      inc i
+
 proc isHtmlTag(text: string, i: int): bool =
   ## Heuristic: "<" starts a tag only if next char begins a tag name
   ## ('/', '!', '?', letter) — not a bare comparison operator.
@@ -214,36 +235,15 @@ proc normalize*(n: HtmlStripper, text: string): string =
 
 proc normalize*(n: UrlReplacer, text: string): string =
   ## Replace URL spans with `n.replacement` (default "<url>").
-  if text.len == 0: return ""
   let repl = if n.replacement.len > 0: n.replacement else: "<url>"
-  result = newStringOfCap(text.len + repl.len)
-  var i = 0
-  while i < text.len:
-    if isUrlStart(text, i):
-      let span = urlLenFrom(text, i)
-      if span > 0:
-        result.add(repl)
-        i += span
-        continue
-    result.add(text[i])
-    inc i
+  replaceSpans(text, repl, urlSpanAt)
 
 proc normalize*(n: EmailReplacer, text: string): string =
   ## Replace email-like spans with `n.replacement` (default "<email>").
   ## Scans forward from `i`; when an email starts exactly at `i`, it is
   ## replaced as a whole, so already-emitted characters never need backtracking.
-  if text.len == 0: return ""
   let repl = if n.replacement.len > 0: n.replacement else: "<email>"
-  result = newStringOfCap(text.len + repl.len)
-  var i = 0
-  while i < text.len:
-    let eLen = emailSpanAt(text, i)
-    if eLen > 0:
-      result.add(repl)
-      i += eLen
-      continue
-    result.add(text[i])
-    inc i
+  replaceSpans(text, repl, emailSpanAt)
 
 # ============================================================
 # Chaining
