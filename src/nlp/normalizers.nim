@@ -41,16 +41,21 @@ type
     ## Converts text to lowercase
 
   AccentStripper* = object
-    ## Strips accents from Unicode characters (café → cafe)
+    ## Strips accents from common accented characters (café → cafe) using a
+    ## fixed lookup table, and drops combining diacritical marks
+    ## (U+0300–U+036F). It does not decompose ligatures or expand characters
+    ## absent from the table: `œ`, `æ`, `ß`, and `ø` are left unchanged.
 
   WhitespaceNormalizer* = object
     ## Collapses multiple whitespace into single spaces
 
   PunctuationStripper* = object
-    ## Removes common punctuation characters
+    ## Removes a fixed ASCII punctuation set. Non-ASCII punctuation (em dash,
+    ## curly quotes, ellipsis, …) is not recognized and is kept.
 
   ChainedNormalizer* = object
-    ## A composition of two normalizers
+    ## A composition of two normalizers. There is no constructor for this type;
+    ## use `chain <#chain>`_ to build a composed normalization proc instead.
     first*: proc(text: string): string
     second*: proc(text: string): string
 
@@ -63,10 +68,15 @@ type
     replaceWith*: string  # if empty, digits are removed
 
   HtmlStripper* = object
-    ## Strips HTML/XML tags (removes "<...>" spans)
+    ## Strips HTML/XML tags with a bounded scanner (not a parser). A `>` inside
+    ## a quoted attribute value is treated as text until the matching quote
+    ## closes; a `<` that does not begin a tag name and an unterminated tag are
+    ## left as literal text.
 
   UrlReplacer* = object
-    ## Replaces http/https/www URLs with a placeholder
+    ## Replaces URL spans with a placeholder. Only `http://`, `https://`, and
+    ## `www.` starts are recognized. Trailing punctuation is trimmed except
+    ## `,`, which is kept as a list separator.
     replacement*: string  # defaults to "<url>" when empty at call site
 
   EmailReplacer* = object
@@ -277,7 +287,8 @@ proc normalize*(n: EmailReplacer, text: string): string =
 # ============================================================
 
 proc chain*(a: proc(text: string): string, b: proc(text: string): string): proc(text: string): string =
-  ## Chain two normalizer functions.
+  ## Chain two normalizer functions. This is the intended composition API;
+  ## the `ChainedNormalizer` type has no constructor.
   result = proc(text: string): string = b(a(text))
 
 # ============================================================

@@ -90,6 +90,53 @@ let similarity = cosineSimilarityBags(
 )
 ```
 
+## Public API
+
+`import nlp` re-exports all of the following. Overloads and labeled
+parameters are omitted here; see the module doc comments for full signatures.
+
+**`tokenize`**
+- `wordTokenize`, `whitespaceTokenize`, `ngramTokenize`, `splitSentences` — convenience tokenizers for words, whitespace, character n-grams, and sentences.
+- `ngrams` — word-level n-grams built from an existing token sequence.
+- `WordTokenizer`, `WhitespaceTokenizer`, `PatternTokenizer`, `NGramTokenizer`, `SentenceTokenizer`, `Tokenizer` — configurable tokenizer types, each with `tokenize`.
+
+**`normalizers`**
+- `normalizeLowercase`, `normalizeStripAccents`, `normalizeWhitespace`, `normalizeStripPunctuation`, `normalizeRemoveNumbers`, `normalizeStripHtml`, `normalizeReplaceUrls`, `normalizeReplaceEmails` — one-call text normalizers.
+- `Lowercaser`, `AccentStripper`, `WhitespaceNormalizer`, `PunctuationStripper`, `NumberNormalizer`, `HtmlStripper`, `UrlReplacer`, `EmailReplacer`, `CustomNormalizer` — normalizer types, each with a `normalize` overload.
+- `chain` — compose two normalizer procs into one.
+
+**`stopwords`**
+- `isStopWord`, `removeStopWords` — language-aware filtering, or filtering against a custom `StopWords` set.
+- `englishStopWords`, `spanishStopWords`, `frenchStopWords`, `germanStopWords` — built-in sets.
+
+**`porter_stemmer` / `smart_stemmer`**
+- `stemWord`, `stemTokens` — Porter stemming.
+- `SmartStemmer`, `stem`, `smartStemWord`, `smartStemTokens` — irregular-form-aware stemming; `irregularPlurals`, `irregularVerbs`, and `noChangeWords` expose the lookup data.
+
+**`analysis`**
+- `termFrequencies`, `documentFrequency`, `idfSmoothed`, `sortedTermsByFrequency` — frequency helpers.
+- `jaccardSimilarity`, `cosineSimilarityBags`, `overlapCoefficient` — similarity measures.
+- `textStats` / `TextStats` — token, unique-term, hapax, and average-length statistics.
+- `uniqueTerms`, `extractKeywords` — corpus vocabulary and keyword extraction.
+
+**`bow`**
+- `fitCounts`, `transformCounts`, `searchCounts` — bag-of-words count model (`CountModel`) with cosine search.
+
+**`embeddings`**
+- `fitTfidf`, `transformTfidf`, `searchTfidf` — TF-IDF model (`TfidfModel`).
+- `fitBm25`, `searchBm25` — BM25 retrieval (`BM25Model`, configurable `k1` and `b`).
+
+**`topics`**
+- `fitLda`, `transformLda` — LDA topic model (`LdaModel`): training and fold-in inference for unseen documents.
+- `docTopicDistribution`, `topicWordDistribution` — per-document and per-topic distributions.
+- `topTerms`, `topTermsByPMI` — topic labeling by phi or by PMI reranking.
+- `perplexity`, `coherenceUMass`, `coherenceCV` — model evaluation.
+
+**`types`**
+- `SparseVector` / `newSparseVector` — index-to-value vectors with `set`, `get`, `containsIdx`, `clear`, `len`, `pairs`, `values`, and `cosineSimilarity`.
+- `Vocabulary` / `newVocabulary` — term-to-id maps with `add`, `id`, `contains`, `containsIdx`, `[]`, `clear`, and `len`.
+- `Term` — the string alias used for terms throughout the API.
+
 ## Linguistic data
 
 The built-in linguistic data (stopword lists, irregular plurals, irregular
