@@ -1,27 +1,24 @@
 ## Stopwords for the nlp library.
 ##
-## The built-in lists are kept as CSV data files under ``data/`` and embedded
-## into the binary at compile time.  CSV parsing uses Nim's standard library.
+## The built-in lists are compile-time constants in ``private/lexicon``; no
+## data files are read at install, compile, or run time.
 
 import std/[sets, strutils, sequtils]
-import ./csv_data
+import ./private/lexicon
 
 type
   StopWords* = HashSet[string]
 
-const stopwordsData = staticRead("data/stopwords.csv")
-
-proc loadStopWords(language: string): StopWords =
+proc buildStopWords(builtin: openArray[string]): StopWords =
   result = initHashSet[string]()
-  for row in csvRows(stopwordsData, "stopwords.csv"):
-    if row.len >= 2 and row[0].toLowerAscii() == language:
-      result.incl(row[1].toLowerAscii())
+  for w in builtin:
+    result.incl(w.toLowerAscii())
 
 let
-  englishStopWords* = loadStopWords("english")
-  spanishStopWords* = loadStopWords("spanish")
-  frenchStopWords* = loadStopWords("french")
-  germanStopWords* = loadStopWords("german")
+  englishStopWords* = buildStopWords(builtinEnglishStopwords)
+  spanishStopWords* = buildStopWords(builtinSpanishStopwords)
+  frenchStopWords* = buildStopWords(builtinFrenchStopwords)
+  germanStopWords* = buildStopWords(builtinGermanStopwords)
 
 proc isStopWord*(word: string, language: string): bool =
   ## Check if a word is a stopword in the given language.

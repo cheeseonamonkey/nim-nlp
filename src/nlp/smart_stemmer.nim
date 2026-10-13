@@ -1,37 +1,19 @@
 ## Smart stemmer for the nlp library.
 ##
-## Combines pattern-based suffix stripping with irregular-form data loaded
-## from CSV files under ``data/``.  The files are embedded at compile time,
-## so users do not need to arrange runtime data paths.
+## Combines pattern-based suffix stripping with irregular-form data held as
+## compile-time constants in ``private/lexicon``; nothing is read from disk at
+## install, compile, or run time.
 
 import std/[tables, strutils, sequtils, sets]
-import ./csv_data
-
-const
-  irregularPluralsData = staticRead("data/irregular_plurals.csv")
-  irregularVerbsData = staticRead("data/irregular_verbs.csv")
-  noChangeWordsData = staticRead("data/no_change_words.csv")
-
-proc loadPairTable(data, filename: string): Table[string, string] =
-  result = initTable[string, string]()
-  for row in csvRows(data, filename):
-    # The first row is the CSV header.
-    if row.len >= 2 and row[0].len > 0 and row[0] != "plural" and row[0] != "form":
-      result[row[0].toLowerAscii()] = row[1].toLowerAscii()
-
-proc loadWordSet(data, filename: string): HashSet[string] =
-  result = initHashSet[string]()
-  for row in csvRows(data, filename):
-    if row.len >= 1 and row[0].len > 0 and row[0] != "word":
-      result.incl(row[0].toLowerAscii())
+import ./private/lexicon
 
 let
   ## Irregular plural forms and their singular equivalents.
-  irregularPlurals* = loadPairTable(irregularPluralsData, "irregular_plurals.csv")
+  irregularPlurals* = builtinIrregularPlurals.toTable
   ## Irregular verb forms and their infinitives.
-  irregularVerbs* = loadPairTable(irregularVerbsData, "irregular_verbs.csv")
+  irregularVerbs* = builtinIrregularVerbs.toTable
   ## Words whose singular and plural forms are identical.
-  noChangeWords* = loadWordSet(noChangeWordsData, "no_change_words.csv")
+  noChangeWords* = builtinNoChangeWords.toHashSet
 
 # ============================================================
 # Internal helpers

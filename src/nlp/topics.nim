@@ -110,7 +110,7 @@ proc fitLda*(
     result.iterations = iterations
     result.seed = seed
     return
-  if alpha <= 0.0 or beta <= 0.0:
+  if not (alpha > 0.0) or not (beta > 0.0):
     raise newException(ValueError, "LDA requires alpha > 0 and beta > 0")
   if iterations <= 0:
     raise newException(ValueError, "LDA requires iterations > 0")
@@ -166,6 +166,7 @@ proc fitLda*(
       inc result.topicSums[k]
 
   # Gibbs sweeps.
+  var probs = newSeq[float](K)
   for _ in 0 ..< iterations:
     for d in 0 ..< D:
       for n in 0 ..< result.docTokens[d].len:
@@ -176,7 +177,7 @@ proc fitLda*(
         dec result.topicWordCounts[kOld][w]
         dec result.topicSums[kOld]
         # Conditional p(z=k | rest) ∝ (n_{d,k}+α)(n_{k,w}+β)/(n_{k,·}+Vβ)
-        var probs = newSeq[float](K)
+        probs.setLen(K)
         for k in 0 ..< K:
           let a = result.docTopicCounts[d][k].float + alpha
           let b = result.topicWordCounts[k][w].float + beta
@@ -417,24 +418,22 @@ proc transformLda*(
     result = newSeq[float](m.numTopics)
     for k in 0 ..< m.numTopics: result[k] = 1.0 / m.numTopics.float
     return
-  let effSeed =
-    if seed != 0: seed
-    else:
-      var h = m.seed
-      for id in ids: h = h * 31 + id.int64
-      h
-  var rng = initRand(effSeed)
+  var h = uint64(m.seed)
+  for id in ids: h = h * 31'u64 + uint64(id)
+  let effSeed = if seed != 0: seed else: cast[int64](h)
+  var rng = initRand(int(effSeed))
   var docCounts = newSeq[int](m.numTopics)
   var assigns = newSeq[int](ids.len)
   for n, _ in ids:
     let k = rng.rand(m.numTopics - 1)
     assigns[n] = k
     inc docCounts[k]
+  var probs = newSeq[float](m.numTopics)
   for _ in 0 ..< iterations:
     for n, w in ids:
       let kOld = assigns[n]
       dec docCounts[kOld]
-      var probs = newSeq[float](m.numTopics)
+      probs.setLen(m.numTopics)
       for k in 0 ..< m.numTopics:
         let a = docCounts[k].float + m.alpha
         let b = m.phi[k][w]
