@@ -82,6 +82,52 @@ proc sampleFromProbs(rng: var Rand, probs: seq[float]): int =
     if r < cum: return i
   probs.len - 1
 
+proc addAssignment(m: var LdaModel, d, w, k: int) =
+  ## Register that token `w` in document `d` is assigned to topic `k`.
+  inc m.docTopicCounts[d][k]
+  inc m.topicWordCounts[k][w]
+  inc m.topicSums[k]
+
+proc removeAssignment(m: var LdaModel, d, w, k: int) =
+  ## Unregister token `w` in document `d` from topic `k`.
+  dec m.docTopicCounts[d][k]
+  dec m.topicWordCounts[k][w]
+  dec m.topicSums[k]
+
+proc computeTopicProbs(
+  m: LdaModel, d, w: int, alpha, beta: float, V: int, probs: var seq[float]
+) =
+  ## Fill the shared `probs` buffer with the collapsed-Gibbs conditional
+  ## p(z=k | rest) ∝ (n_{d,k}+α)(n_{k,w}+β)/(n_{k,·}+Vβ).
+  probs.setLen(m.numTopics)
+  for k in 0 ..< m.numTopics:
+    let a = m.docTopicCounts[d][k].float + alpha
+    let b = m.topicWordCounts[k][w].float + beta
+    let c = m.topicSums[k].float + V.float * beta
+    probs[k] = a * b / c
+
+proc sampleTokenTopic(
+  m: var LdaModel, d, n: int, alpha, beta: float, V: int,
+  rng: var Rand, probs: var seq[float]
+): int =
+  ## Re-sample the topic of token `n` in document `d`, updating counts.
+  let w = m.docTokens[d][n]
+  let kOld = m.assignments[d][n]
+  removeAssignment(m, d, w, kOld)
+  computeTopicProbs(m, d, w, alpha, beta, V, probs)
+  let kNew = sampleFromProbs(rng, probs)
+  m.assignments[d][n] = kNew
+  addAssignment(m, d, w, kNew)
+  kNew
+
+proc gibbsSweep(
+  m: var LdaModel, alpha, beta: float, V: int, rng: var Rand, probs: var seq[float]
+) =
+  ## One full Gibbs sweep over every token in every document.
+  for d in 0 ..< m.numDocs:
+    for n in 0 ..< m.docTokens[d].len:
+      discard sampleTokenTopic(m, d, n, alpha, beta, V, rng, probs)
+
 # ============================================================
 # Fit — collapsed Gibbs
 # ============================================================
@@ -161,33 +207,12 @@ proc fitLda*(
       let w = result.docTokens[d][n]
       let k = rng.rand(K - 1)
       result.assignments[d][n] = k
-      inc result.docTopicCounts[d][k]
-      inc result.topicWordCounts[k][w]
-      inc result.topicSums[k]
+      addAssignment(result, d, w, k)
 
   # Gibbs sweeps.
   var probs = newSeq[float](K)
   for _ in 0 ..< iterations:
-    for d in 0 ..< D:
-      for n in 0 ..< result.docTokens[d].len:
-        let w = result.docTokens[d][n]
-        var kOld = result.assignments[d][n]
-        # Decrement
-        dec result.docTopicCounts[d][kOld]
-        dec result.topicWordCounts[kOld][w]
-        dec result.topicSums[kOld]
-        # Conditional p(z=k | rest) ∝ (n_{d,k}+α)(n_{k,w}+β)/(n_{k,·}+Vβ)
-        probs.setLen(K)
-        for k in 0 ..< K:
-          let a = result.docTopicCounts[d][k].float + alpha
-          let b = result.topicWordCounts[k][w].float + beta
-          let c = result.topicSums[k].float + V.float * beta
-          probs[k] = a * b / c
-        let kNew = sampleFromProbs(rng, probs)
-        result.assignments[d][n] = kNew
-        inc result.docTopicCounts[d][kNew]
-        inc result.topicWordCounts[kNew][w]
-        inc result.topicSums[kNew]
+    gibbsSweep(result, alpha, beta, V, rng, probs)
 
   rebuildPhiTheta(result)
 
@@ -216,15 +241,6 @@ proc topTerms*(m: LdaModel, topic: int, n: int = 10): seq[(string, float)] =
     if a[1] == b[1]: cmp(a[0], b[0])
     else: cmp(b[1], a[1]))
   if scored.len > n: scored[0 ..< n] else: scored
-
-proc buildDocFreq(docs: seq[seq[string]]): Table[string, int] =
-  result = initTable[string, int]()
-  for doc in docs:
-    var seen = initHashSet[string]()
-    for t in doc:
-      if t notin seen:
-        seen.incl(t)
-        result[t] = result.getOrDefault(t, 0) + 1
 
 proc buildCooccurrence(
   docs: seq[seq[string]]
@@ -340,16 +356,7 @@ proc coherenceUMass*(
   ## UMass coherence averaged over topics: mean over consecutive pairs
   ## in `topTerms` of log((D(w_i,w_j)+eps)/D(w_j)). Document-level.
   if m.numTopics == 0 or documents.len == 0 or topN <= 0: return 0.0
-  let df = buildDocFreq(documents)
-  var pair = initTable[(string, string), int]()
-  for doc in documents:
-    let uniq = toHashSet(doc)
-    let terms = toSeq(uniq)
-    for i in 0 ..< terms.len:
-      for j in (i + 1) ..< terms.len:
-        let a = terms[i]; let b = terms[j]
-        let key = if a <= b: (a, b) else: (b, a)
-        pair[key] = pair.getOrDefault(key, 0) + 1
+  let (df, pair) = buildCooccurrence(documents)
   var total = 0.0
   var count = 0
   for k in 0 ..< m.numTopics:
@@ -395,6 +402,29 @@ proc coherenceCV*(
 # Fold-in: infer topic distribution for an unseen document
 # ============================================================
 
+proc foldInToken(
+  w: int, docCounts: var seq[int], phi: seq[seq[float]], assigns: var seq[int],
+  n: int, alpha: float, rng: var Rand, probs: var seq[float]
+): int =
+  ## Re-sample the topic for one token of the held-out document.
+  let kOld = assigns[n]
+  dec docCounts[kOld]
+  probs.setLen(docCounts.len)
+  for k in 0 ..< docCounts.len:
+    # Collapsed conditional ∝ (n_{d,k}+α) * φ_{k,w}
+    probs[k] = (docCounts[k].float + alpha) * phi[k][w]
+  let kNew = sampleFromProbs(rng, probs)
+  assigns[n] = kNew
+  inc docCounts[kNew]
+  kNew
+
+proc foldInSweep(
+  ids: seq[int], docCounts: var seq[int], phi: seq[seq[float]],
+  assigns: var seq[int], alpha: float, rng: var Rand, probs: var seq[float]
+) =
+  for n, w in ids:
+    discard foldInToken(w, docCounts, phi, assigns, n, alpha, rng, probs)
+
 proc transformLda*(
   m: LdaModel,
   doc: seq[string],
@@ -430,18 +460,7 @@ proc transformLda*(
     inc docCounts[k]
   var probs = newSeq[float](m.numTopics)
   for _ in 0 ..< iterations:
-    for n, w in ids:
-      let kOld = assigns[n]
-      dec docCounts[kOld]
-      probs.setLen(m.numTopics)
-      for k in 0 ..< m.numTopics:
-        let a = docCounts[k].float + m.alpha
-        let b = m.phi[k][w]
-        # Collapsed conditional ∝ (n_{d,k}+α) * φ_{k,w}
-        probs[k] = a * b
-      let kNew = sampleFromProbs(rng, probs)
-      assigns[n] = kNew
-      inc docCounts[kNew]
+    foldInSweep(ids, docCounts, m.phi, assigns, m.alpha, rng, probs)
   result = newSeq[float](m.numTopics)
   let denom = ids.len.float + m.numTopics.float * m.alpha
   for k in 0 ..< m.numTopics:
