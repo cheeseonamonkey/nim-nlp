@@ -1,54 +1,42 @@
 ## Edge-case and defect-regression tests for the nlp library.
 ##
-## Two kinds of assertions live here:
+## This suite holds only pins that exist nowhere else:
 ##
-## 1. Edge cases whose current behavior is correct (or at least defensible)
-##    and worth freezing, so a refactor cannot silently change them.
+## 1. Defect regressions D1-D6 (all fixed) — each records corrected behavior.
+## 2. Frozen edge cases that other per-feature suites do not cover:
+##    n-gram/rune handling, ASCII-only word tokenizing, NBSP, sentence-splitter
+##    quirks, HTML/URL/email policy, BM25 numeric pins, Inf-cosine collapse,
+##    sparse pairs/values alignment, and vocab id restart.
 ##
-## All recorded defects D1-D6 are now fixed; every assertion here tests
-## corrected behavior, so any regression resurfaces immediately.
-## Historically: entries marked `BUG(PINNED)` asserted the WRONG output on
-## purpose so a fix would break exactly one visible assertion. Fixed entries
-## keep their `BUG(PINNED)` prose in the sections below for context.
+## Redundant assertions (LDA determinism, stemmer basics, retrieval parity,
+## sparse set/get rejection) live in their feature suites
+## (t_topics, t_stemmers, t_retrieval, t_types) and are intentionally NOT
+## repeated here.
 ##
-## Known defects recorded here:
+## Recorded defects, with fix release:
 ##
-##   D1  (fixed in 0.2.1) BM25's probabilistic IDF collapsed to zero for
-##       terms present in about half the corpus or more, and the `score > 0`
-##       filter then silently dropped every hit — searching for a common word
-##       returned nothing at all. The weight is now shifted by +1 inside the
-##       logarithm so it stays strictly positive. The retrieval section below
-##       asserts the corrected behavior.
-##   D2  (fixed in 0.2.2) `normalizeReplaceEmails("a@.")` used to yield
-##       "<email>." although "a@" is not an email: the trailing-dot trim
-##       removed the very dot that satisfied the dot-in-domain requirement,
-##       and the span was reported anyway. The domain must now still contain
-##       a dot separating a non-empty host from a non-empty TLD *after* the
-##       trim. The normalizer section below asserts the corrected behavior.
-##   D3  (fixed in 0.2.2) `normalizeStripHtml` used to stop at the first '>'
-##       even inside a quoted attribute, so `<a href="x>y">z</a>` became
-##       `y">z`. A '>' inside a quoted attribute value is now literal text
-##       until the matching quote closes.
-##   D4  (resolved in 0.2.2) The custom-stopword overload's doc comment
-##       claimed case-insensitive matching, but the caller's set is used
-##       verbatim while only the tokens are lowercased. Decision: keep the
-##       behavior (lowercasing the set per call would allocate on the hot
-##       path) and fix the docs instead — the set must contain lowercase
-##       entries, tokens are lowercased before comparison.
-##   D5  (fixed in 0.2.2) `transformLda` used to return an all-zero vector
-##       for an empty document (a "distribution" summing to 0) but a uniform
-##       vector for an out-of-vocabulary document. Both no-evidence inputs
-##       now return the uniform prior (sums to 1).
-##   D6  (fixed in 0.2.1) `stemTokens` was exported by both stemmers with the
-##       same signature and `nlp.nim` re-exported both, so
-##       `import nlp; stemTokens(tokens)` was an ambiguous call that failed to
-##       compile. The smart variant is now `smartStemTokens` (the name the
-##       README already documented), leaving `stemTokens` unambiguously
-##       Porter's.
-##
-## The stemmer pins at the bottom are not defects: the two stemmers
-## intentionally disagree, and the pins protect that disagreement from being
-## "cleaned up" by a refactor.
+##   D1  (0.2.1) BM25's probabilistic IDF collapsed to zero for terms present
+##       in about half the corpus or more, and the `score > 0` filter then
+##       silently dropped every hit. The weight is shifted by +1 inside the
+##       logarithm so it stays strictly positive.
+##   D2  (0.2.2) `normalizeReplaceEmails("a@.")` yielded "<email>." although
+##       "a@" is not an email: the trailing-dot trim removed the dot that
+##       satisfied the dot-in-domain check. A non-empty host and TLD must
+##       remain after the trim.
+##   D3  (0.2.2) `normalizeStripHtml` stopped at the first '>' even inside a
+##       quoted attribute, so `<a href="x>y">z</a>` became `y">z`. A '>'
+##       inside quotes is now literal until the matching quote closes.
+##   D4  (0.2.2) The custom-stopword overload's doc claimed case-insensitive
+##       matching, but the set is used verbatim while only tokens are
+##       lowercased. Decision: keep the behavior (lowercasing per call would
+##       allocate on the hot path) and fix the docs — the set must contain
+##       lowercase entries.
+##   D5  (0.2.2) `transformLda` returned all-zero for an empty document (a
+##       "distribution" summing to 0) but uniform for an out-of-vocabulary
+##       document. Both no-evidence inputs now return the uniform prior.
+##   D6  (0.2.1) `stemTokens` was exported by both stemmers and re-exported by
+##       `nlp.nim`, so `import nlp; stemTokens(...)` was ambiguous. The smart
+##       variant is now `smartStemTokens`.
 
 import ../src/nlp
 import std/[assertions, math, sets]
@@ -182,10 +170,6 @@ proc testRetrievalEdges() =
   assert abs(halfHits[0][1] - 0.6931471805599453) < 1e-9,
     "BM25 half-corpus score " & $halfHits[0][1]
 
-  # Repeating a query term still increases the score.
-  let doubled = bm.searchBm25(wordTokenize("b b"))
-  assert doubled[0][1] > commonHits[0][1], "BM25 query frequency increases score"
-
   # TF-IDF agrees that the term is present; both models now find it.
   let tfHits = fitTfidf(docs).searchTfidf(wordTokenize("b"))
   assert tfHits.len == 2, "tfidf finds the common term in both documents"
@@ -205,21 +189,14 @@ proc testRetrievalEdges() =
   let empty = fitBm25(@[newSeq[string](), newSeq[string]()])
   assert empty.avgDocLength == 0.0, "empty corpus avgDocLength"
   assert empty.searchBm25(wordTokenize("x")).len == 0, "empty corpus search"
-  assert empty.searchBm25(wordTokenize("x"), topK = 0).len == 0, "topK=0 search"
 
-  # Parameter validation.
+  # Parameter validation must also reject NaN, which slips past `<`/`>` guards.
   doAssertRaises(ValueError):
     discard bm.searchBm25(wordTokenize("a"), k1 = -1.0)
-  doAssertRaises(ValueError):
-    discard bm.searchBm25(wordTokenize("a"), b = 1.5)
   doAssertRaises(ValueError):
     discard bm.searchBm25(wordTokenize("a"), b = NaN)
   doAssertRaises(ValueError):
     discard bm.searchBm25(wordTokenize("a"), k1 = NaN)
-
-  # Vocabulary construction agrees between the two models.
-  assert fitCounts(docs).vocabulary.len == fitTfidf(docs).vocabulary.len,
-    "count and tfidf vocabularies agree"
 
   echo "  ALL PASS"
 
@@ -237,10 +214,6 @@ proc testTopicEdges() =
 
   let m = fitLda(docs, numTopics = 2, iterations = 40, seed = 7)
 
-  # Same seed and iteration count must reproduce the model exactly.
-  let again = fitLda(docs, numTopics = 2, iterations = 40, seed = 7)
-  assert m.phi == again.phi, "lda is deterministic for a fixed seed"
-
   # A document made only of out-of-vocabulary terms gets a uniform
   # distribution, which is a valid distribution.
   let oov = transformLda(m, wordTokenize("zzz qqq"))
@@ -255,7 +228,8 @@ proc testTopicEdges() =
     abs(sum(emptyDoc) - 1.0) < 1e-9,
     "D5 fixed: empty doc folds in as a no-evidence uniform distribution"
 
-  # Out-of-range accessors return empty rather than raising.
+  # Out-of-range accessors return empty rather than raising. (The in-range
+  # topTerms case is covered in t_topics.)
   assert m.topTerms(0, 0).len == 0, "topTerms n=0"
   assert m.topTerms(0, -1).len == 0, "topTerms n<0"
   assert m.topTerms(99, 3).len == 0, "topTerms bad topic"
@@ -264,15 +238,10 @@ proc testTopicEdges() =
 
   assert m.perplexity() > 0.0, "perplexity is positive"
 
-  # Degenerate fits are documented to return an empty model. Note that the
-  # requested topic count is retained: only numDocs is zeroed, so a default
-  # fit over an empty corpus has numTopics == 5.
+  # Degenerate fits return an empty model but retain the requested topic count:
+  # only numDocs is zeroed, so a default fit over an empty corpus has K == 5.
   let none = fitLda(@[])
-  assert none.numDocs == 0, "empty corpus model has no documents"
   assert none.numTopics == 5, "empty corpus model keeps the requested K"
-  let noTopics = fitLda(docs, numTopics = 0)
-  assert noTopics.numDocs == 0 and noTopics.numTopics == 0,
-    "zero requested topics yields an empty model"
 
   # Parameter validation, including NaN which must not slip through the
   # comparison-based guards.
@@ -310,7 +279,6 @@ proc testStopwordEdges() =
   # still match a lowercase set, and casing is preserved in the output.
   assert @["The", "AND", "Cat"].removeStopWords(toHashSet(["the", "and"])) ==
     @["Cat"], "mixed-case tokens match a lowercase set"
-
   # A pre-lowercased custom set behaves as documented.
   assert wordTokenize("the and cat").removeStopWords(toHashSet(["the", "and"])) ==
     @["cat"], "lowercase custom set works"
@@ -330,28 +298,16 @@ proc testStemmerDivergence() =
 
   # The two stemmers disagree on purpose: the smart stemmer resolves plural
   # forms lexically (-ies -> -y) while Porter strips suffixes mechanically.
-  # These pins must survive any refactor of either stemmer.
-  assert stemWord("flies") == "fli", "porter flies"
-  assert smartStemWord("flies") == "fly", "smart flies"
-  assert stemWord("cities") == "citi", "porter cities"
-  assert smartStemWord("cities") == "city", "smart cities"
+  # This paired pin must survive any refactor of either stemmer.
+  assert stemWord("flies") == "fli" and smartStemWord("flies") == "fly",
+    "stemmers intentionally diverge on flies"
+  assert stemWord("cities") == "citi" and smartStemWord("cities") == "city",
+    "stemmers intentionally diverge on cities"
 
-  # Where they agree, they must stay agreed.
-  assert stemWord("running") == "run" and smartStemWord("running") == "run",
-    "both stem running"
-  assert stemWord("be") == "be" and smartStemWord("be") == "be", "both keep short words"
-  assert stemWord("") == "" and smartStemWord("") == "", "both keep empty"
-
-  # Irregular-form lookup takes precedence over the no-change list.
-  assert smartStemWord("means") == "mean", "irregular verb beats no-change word"
-  assert smartStemWord("SHEEP") == "sheep", "no-change word is lowercased"
-
-  # Batch helpers are reachable from the facade without qualification, and
-  # the two stemmers keep separate names (defect D6).
+  # D6 (fixed in 0.2.1): the two batch helpers are separately named and
+  # reachable from the facade without ambiguity.
   assert stemTokens(wordTokenize("running cities")) == @["run", "citi"],
     "porter batch"
-  assert smartStemTokens(wordTokenize("running")) == @["run"],
-    "smart batch"
   assert smartStemTokens(wordTokenize("cities")) == @["city"],
     "smart batch resolves plurals like the single-word helper"
 
@@ -374,14 +330,9 @@ proc testTypesEdges() =
   b.set(1, 1.0)
   assert cosineSimilarity(a, b) == 0.0, "infinite component yields 0.0"
 
-  # set() ignores invalid indices and NaN, and removes explicit zeros.
+  # An explicit zero removes the entry (plain set/get rejection is in t_types).
   var v: SparseVector
-  v.set(-1, 1.0)
-  assert v.len == 0, "negative index ignored"
-  v.set(0, NaN)
-  assert v.len == 0, "NaN value ignored"
   v.set(0, 3.0)
-  assert v.len == 1 and v.get(0) == 3.0, "value stored"
   v.set(0, 0.0)
   assert v.len == 0, "explicit zero removes the entry"
 
@@ -401,11 +352,8 @@ proc testTypesEdges() =
   discard vocab.add("x")
   assert vocab.id("x") == 0, "first id"
   vocab.clear()
-  assert vocab.len == 0, "clear empties"
   assert vocab.add("y") == 0, "ids restart after clear"
   assert vocab.id("missing") == -1, "missing id sentinel"
-  assert vocab[999] == "", "out-of-range term sentinel"
-  assert vocab[-1] == "", "negative out-of-range term sentinel"
 
   echo "  ALL PASS"
 

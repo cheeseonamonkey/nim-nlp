@@ -49,18 +49,12 @@ proc clear*(v: var SparseVector) =
 proc len*(v: SparseVector): int = v.data.len
 
 proc pairs*(v: SparseVector): seq[(int, float)] =
-  result = newSeq[(int, float)](v.data.len)
-  var i = 0
   for k, val in v.data:
-    result[i] = (k, val)
-    inc i
+    result.add((k, val))
 
 proc values*(v: SparseVector): seq[float] =
-  result = newSeq[float](v.data.len)
-  var i = 0
   for _, val in v.data:
-    result[i] = val
-    inc i
+    result.add(val)
 
 proc cosineSimilarity*(a, b: SparseVector): float =
   ## Cosine similarity between two sparse vectors.

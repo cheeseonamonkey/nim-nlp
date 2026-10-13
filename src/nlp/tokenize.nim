@@ -104,30 +104,29 @@ proc tokenize*(t: NGramTokenizer, text: string): seq[string] =
       gram.add($chars[j])
     result.add(gram)
 
+proc pushSentence(current: string, t: SentenceTokenizer,
+                  result: var seq[string]) =
+  ## Append one accumulated sentence, honoring `discardEmpty`.
+  let stripped = current.strip()
+  if t.discardEmpty:
+    if stripped.len > 0: result.add(stripped)
+  else:
+    result.add(stripped)
+
 proc tokenize*(t: SentenceTokenizer, text: string): seq[string] =
   ## Split text into sentences.
   if text.len == 0:
     if not t.discardEmpty: result.add("")
     return
   var current = newStringOfCap(text.len)
-  var i = 0
-  while i < text.len:
+  for i in 0 ..< text.len:
     current.add(text[i])
-    if text[i] in {'.', '!', '?'}:
-      if i + 1 >= text.len or text[i+1] in Whitespace:
-        if t.discardEmpty:
-          let stripped = current.strip()
-          if stripped.len > 0: result.add(stripped)
-        else:
-          if current.len > 0: result.add(current.strip())
-        current.setLen(0)
-    inc i
+    if text[i] in {'.', '!', '?'} and
+        (i + 1 >= text.len or text[i+1] in Whitespace):
+      pushSentence(current, t, result)
+      current.setLen(0)
   if current.len > 0:
-    let stripped = current.strip()
-    if t.discardEmpty:
-      if stripped.len > 0: result.add(stripped)
-    else:
-      result.add(stripped)
+    pushSentence(current, t, result)
 
 # ============================================================
 # N-grams from token sequences

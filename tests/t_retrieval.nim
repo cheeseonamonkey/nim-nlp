@@ -1,7 +1,8 @@
 ## TF-IDF, BM25, and count-vectorizer tests for the nlp library.
 
 import ../src/nlp
-import std/[tables, sets]
+import ../src/nlp/private/model_utils
+import std/[tables, sets, sequtils]
 
 proc testEmbeddings() =
   echo "\n=== Embeddings ==="
@@ -117,7 +118,51 @@ proc testRetrievalEdges() =
 
   echo "  ALL PASS"
 
+proc testRankTopK() =
+  echo "\n=== rankTopK edges ==="
+
+  # Truncation boundaries. topK == 0 yields nothing, topK >= len is a no-op,
+  # and ordering is score-descending with an ascending-key tie-break.
+  let scores = @[(2, 1.0), (0, 1.0), (1, 1.0)]
+  assert rankTopK(scores, 0) == @[], "rankTopK topK=0"
+  assert rankTopK(scores, 3) == @[(0, 1.0), (1, 1.0), (2, 1.0)], "rankTopK exact ties"
+  assert rankTopK(scores, 2) == @[(0, 1.0), (1, 1.0)], "rankTopK tie truncation"
+  assert rankTopK(scores, 99) == @[(0, 1.0), (1, 1.0), (2, 1.0)], "rankTopK topK>len"
+
+  # A negative topK slices the sequence backwards, which raises RangeDefect.
+  # This is pre-existing behavior (the old per-module topScores did the same)
+  # and is pinned rather than fixed so the contract is explicit.
+  doAssertRaises(RangeDefect):
+    discard rankTopK(scores, -1)
+
+  # NaN scores make the comparator non-total (NaN compares neither < nor >
+  # nor == another value), so ordering among NaN entries is
+  # implementation-defined. The guarantee we do pin: no crash, every non-NaN
+  # entry survives, and the highest finite score leads. Entry positions are
+  # pinned by key because tuple equality is false whenever a value is NaN.
+  let nan = 0.0 / 0.0
+  let mixed = @[(3, 2.0), (1, nan), (0, 1.0), (2, nan), (4, 3.0)]
+  let ranked = rankTopK(mixed, 5)
+  assert ranked.len == 5, "rankTopK NaN keeps all entries"
+  assert ranked[0] == (4, 3.0), "rankTopK NaN highest finite first"
+  var finiteKept = 0
+  for (idx, score) in ranked:
+    if score == score:
+      inc finiteKept
+      assert score in [1.0, 2.0, 3.0] and idx in [0, 3, 4],
+        "rankTopK NaN retains finite entries"
+  assert finiteKept == 3, "rankTopK NaN retains all finite entries"
+  # Concrete truncation order, checked by key (values contain NaN).
+  let top3 = rankTopK(mixed, 3)
+  assert top3.mapIt(it[0]) == @[4, 2, 3],
+    "rankTopK NaN truncation keys (implementation-defined NaN ordering)"
+  assert top3[0] == (4, 3.0) and top3[1][1] != top3[1][1] and top3[2] == (3, 2.0),
+    "rankTopK NaN truncation values"
+
+  echo "  ALL PASS"
+
 when isMainModule:
   testEmbeddings()
   testCounts()
   testRetrievalEdges()
+  testRankTopK()
