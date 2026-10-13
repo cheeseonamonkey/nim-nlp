@@ -250,8 +250,10 @@ proc smartStemWord*(word: string): string =
   ## Quick stem a single word.
   SmartStemmer().stem(word)
 
-proc stemTokens*(tokens: seq[string]): seq[string] =
-  ## Stem a token sequence. Returns empty for empty input.
+proc smartStemTokens*(tokens: seq[string]): seq[string] =
+  ## Stem a token sequence with the smart stemmer. Returns empty for empty
+  ## input. Named ``smartStemTokens`` so it does not collide with the Porter
+  ## ``stemTokens`` re-exported by the ``nlp`` facade.
   if tokens.len == 0: return
   let s = SmartStemmer()
   tokens.mapIt(s.stem(it))

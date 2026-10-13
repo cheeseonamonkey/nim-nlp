@@ -29,19 +29,18 @@
 ##   D5  `transformLda` returns an all-zero vector for an empty document (a
 ##       "distribution" summing to 0) but a uniform vector for an
 ##       out-of-vocabulary document. The two empty-ish inputs disagree.
-##   D6  `stemTokens` is exported by both `porter_stemmer` and
-##       `smart_stemmer` with the same signature, and `nlp.nim` re-exports
-##       both, so `import nlp; stemTokens(tokens)` is an ambiguous call that
-##       fails to compile. Callers must disambiguate by importing one module
-##       directly. This file does exactly that.
+##   D6  (fixed in 0.2.1) `stemTokens` was exported by both stemmers with the
+##       same signature and `nlp.nim` re-exported both, so
+##       `import nlp; stemTokens(tokens)` was an ambiguous call that failed to
+##       compile. The smart variant is now `smartStemTokens` (the name the
+##       README already documented), leaving `stemTokens` unambiguously
+##       Porter's.
 ##
 ## The stemmer pins at the bottom are not defects: the two stemmers
 ## intentionally disagree, and the pins protect that disagreement from being
 ## "cleaned up" by a refactor.
 
 import ../src/nlp
-import ../src/nlp/porter_stemmer as porter
-import ../src/nlp/smart_stemmer as smart
 import std/[assertions, math, sets]
 
 # ============================================================
@@ -314,12 +313,14 @@ proc testStemmerDivergence() =
   assert smartStemWord("means") == "mean", "irregular verb beats no-change word"
   assert smartStemWord("SHEEP") == "sheep", "no-change word is lowercased"
 
-  # Batch helpers agree with their single-word counterparts. They must be
-  # called through their own modules: see defect D6.
-  assert porter.stemTokens(wordTokenize("running cities")) == @["run", "citi"],
+  # Batch helpers are reachable from the facade without qualification, and
+  # the two stemmers keep separate names (defect D6).
+  assert stemTokens(wordTokenize("running cities")) == @["run", "citi"],
     "porter batch"
-  assert smart.stemTokens(wordTokenize("running")) == @["run"],
+  assert smartStemTokens(wordTokenize("running")) == @["run"],
     "smart batch"
+  assert smartStemTokens(wordTokenize("cities")) == @["city"],
+    "smart batch resolves plurals like the single-word helper"
 
   echo "  ALL PASS"
 
