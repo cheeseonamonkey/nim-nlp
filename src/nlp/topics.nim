@@ -434,7 +434,12 @@ proc transformLda*(
   ## Fold-in inference for an unseen tokenized document.
   ## Keeps phi fixed and Gibbs-samples topic assignments for the new doc.
   ## `seed==0` derives a seed from model seed + doc hash for determinism.
-  if m.numTopics == 0 or m.vocabulary.len == 0 or doc.len == 0:
+  ##
+  ## An empty document (or one with only out-of-vocabulary terms) has no
+  ## evidence to fold in, so it returns the uniform prior — a valid
+  ## distribution that sums to 1 — rather than zeros. Empty-model calls
+  ## (numTopics == 0 or empty vocabulary) still return all zeros.
+  if m.numTopics == 0 or m.vocabulary.len == 0:
     return newSeq[float](max(0, m.numTopics))
   if iterations <= 0:
     raise newException(ValueError, "transformLda requires iterations > 0")
@@ -444,7 +449,8 @@ proc transformLda*(
     let id = m.vocabulary.id(term)
     if id >= 0: ids.add(id)
   if ids.len == 0:
-    # No in-vocab terms → prior only
+    # No in-vocab terms (including an empty document) → prior only,
+    # a distribution summing to 1.
     result = newSeq[float](m.numTopics)
     for k in 0 ..< m.numTopics: result[k] = 1.0 / m.numTopics.float
     return

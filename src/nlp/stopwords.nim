@@ -45,6 +45,10 @@ proc removeStopWords*(tokens: seq[string], language: string): seq[string] =
 
 proc removeStopWords*(tokens: seq[string], stopwords: StopWords): seq[string] =
   ## Remove stopwords using a custom set.
-  ## Case-insensitive comparison.
+  ##
+  ## Tokens are lowercased before comparison, so a mixed-case token matches a
+  ## lowercase entry. The caller's set is used *verbatim*: it is NOT lowercased
+  ## for you, so entries must already be lowercase (e.g. `toHashSet(["the"])`,
+  ## not `toHashSet(["THE"])`).
   if tokens.len == 0: return
   tokens.filterIt(it.toLowerAscii() notin stopwords)

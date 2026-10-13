@@ -1,4 +1,4 @@
-version       = "0.2.1"
+version       = "0.2.2"
 author        = "cheeseonamonkey"
 description   = "Dependency-free NLP toolkit for Nim: tokenization, normalization, stemming, TF-IDF, BM25, and text analysis"
 license       = "MIT"

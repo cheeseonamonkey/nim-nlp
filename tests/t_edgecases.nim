@@ -4,10 +4,12 @@
 ##
 ## 1. Edge cases whose current behavior is correct (or at least defensible)
 ##    and worth freezing, so a refactor cannot silently change them.
-## 2. Known defects, marked `BUG(PINNED)`. These deliberately assert today's
-##    WRONG output. Fixing a defect will therefore break exactly one visible
-##    assertion instead of silently changing behavior. When a defect is fixed,
-##    update the pinned assertion to the corrected value.
+##
+## All recorded defects D1-D6 are now fixed; every assertion here tests
+## corrected behavior, so any regression resurfaces immediately.
+## Historically: entries marked `BUG(PINNED)` asserted the WRONG output on
+## purpose so a fix would break exactly one visible assertion. Fixed entries
+## keep their `BUG(PINNED)` prose in the sections below for context.
 ##
 ## Known defects recorded here:
 ##
@@ -17,18 +19,26 @@
 ##       returned nothing at all. The weight is now shifted by +1 inside the
 ##       logarithm so it stays strictly positive. The retrieval section below
 ##       asserts the corrected behavior.
-##   D2  `normalizeReplaceEmails("a@.")` yields "<email>." — "a@" is not an
-##       email. The trailing-dot trim removes the very dot that satisfied the
-##       dot-in-domain requirement, and the span is reported anyway.
-##   D3  `normalizeStripHtml` stops at the first '>' even inside a quoted
-##       attribute, so `<a href="x>y">z</a>` becomes `y">z`.
-##   D4  The custom-stopword overload is not case-insensitive despite its
-##       doc comment: the caller's set is used verbatim while only the tokens
-##       are lowercased, so `toHashSet(["THE"]).removeStopWords` matches
-##       nothing.
-##   D5  `transformLda` returns an all-zero vector for an empty document (a
-##       "distribution" summing to 0) but a uniform vector for an
-##       out-of-vocabulary document. The two empty-ish inputs disagree.
+##   D2  (fixed in 0.2.2) `normalizeReplaceEmails("a@.")` used to yield
+##       "<email>." although "a@" is not an email: the trailing-dot trim
+##       removed the very dot that satisfied the dot-in-domain requirement,
+##       and the span was reported anyway. The domain must now still contain
+##       a dot separating a non-empty host from a non-empty TLD *after* the
+##       trim. The normalizer section below asserts the corrected behavior.
+##   D3  (fixed in 0.2.2) `normalizeStripHtml` used to stop at the first '>'
+##       even inside a quoted attribute, so `<a href="x>y">z</a>` became
+##       `y">z`. A '>' inside a quoted attribute value is now literal text
+##       until the matching quote closes.
+##   D4  (resolved in 0.2.2) The custom-stopword overload's doc comment
+##       claimed case-insensitive matching, but the caller's set is used
+##       verbatim while only the tokens are lowercased. Decision: keep the
+##       behavior (lowercasing the set per call would allocate on the hot
+##       path) and fix the docs instead — the set must contain lowercase
+##       entries, tokens are lowercased before comparison.
+##   D5  (fixed in 0.2.2) `transformLda` used to return an all-zero vector
+##       for an empty document (a "distribution" summing to 0) but a uniform
+##       vector for an out-of-vocabulary document. Both no-evidence inputs
+##       now return the uniform prior (sums to 1).
 ##   D6  (fixed in 0.2.1) `stemTokens` was exported by both stemmers with the
 ##       same signature and `nlp.nim` re-exported both, so
 ##       `import nlp; stemTokens(tokens)` was an ambiguous call that failed to
@@ -103,17 +113,33 @@ proc testNormalizerEdges() =
   assert normalizeStripHtml("<3") == "<3", "heart kept"
   assert normalizeStripHtml("unclosed <tag") == "unclosed <tag", "unterminated tag kept"
 
-  # BUG(PINNED) D3: a '>' inside a quoted attribute value ends the tag early.
-  assert normalizeStripHtml("<a href=\"x>y\">z</a>") == "y\">z",
-    "BUG(PINNED) D3: quoted '>' truncates the tag"
+  # D3 (fixed in 0.2.2): a '>' inside a quoted attribute value is literal
+  # text until the matching quote closes — double or single quotes.
+  assert normalizeStripHtml("<a href=\"x>y\">z</a>") == "z",
+    "D3 fixed: quoted '>' no longer truncates the tag"
+  assert normalizeStripHtml("<a href='x>y'>z</a>") == "z",
+    "D3 fixed: single-quoted '>' no longer truncates the tag"
+  assert normalizeStripHtml("<a title=\"a>b\" href=\"c>d\">ok</a>") == "ok",
+    "multiple quoted '>' attributes survive"
+  assert normalizeStripHtml("unclosed <a href=\"x>y") == "unclosed <a href=\"x>y",
+    "quote opened but tag never closed"
 
   # Email spans; the simple heuristic needs a dot in the domain.
   assert normalizeReplaceEmails("a@b") == "a@b", "email needs a dotted domain"
   assert normalizeReplaceEmails("a@") == "a@", "email needs a domain"
   assert normalizeReplaceEmails("a@b.c") == "<email>", "short dotted domain matches"
-  # BUG(PINNED) D2: the dot is trimmed away and the span is still reported.
-  assert normalizeReplaceEmails("a@.") == "<email>.",
-    "BUG(PINNED) D2: 'a@.' is not an email"
+  # D2 (fixed in 0.2.2): the domain must still be host.tld *after* the
+  # trailing-dot trim, so "a@." is literal text now.
+  assert normalizeReplaceEmails("a@.") == "a@.",
+    "D2 fixed: 'a@.' is not an email"
+  assert normalizeReplaceEmails("user@x.org.") == "<email>.",
+    "D2 fixed: trailing sentence dot stays outside the span"
+  assert normalizeReplaceEmails("write to a@b.org.") == "write to <email>.",
+    "trailing sentence dot after a real email"
+  assert normalizeReplaceEmails("mail me (a@b.c) now") == "mail me (<email>) now",
+    "span works through surrounding punctuation"
+  assert normalizeReplaceEmails("a@b.") == "a@b.",
+    "dot-only domain with empty host is not an email"
 
   # URL spans; only http/https/www are recognized, and trailing punctuation is
   # trimmed from the span rather than consumed.
@@ -221,10 +247,13 @@ proc testTopicEdges() =
   assert oov.len == 2, "oov fold-in length"
   assert abs(oov[0] - 0.5) < 1e-9 and abs(oov[1] - 0.5) < 1e-9, "oov fold-in uniform"
 
-  # BUG(PINNED) D5: an empty document returns zeros, which does not sum to 1
-  # and disagrees with the uniform answer given to an all-OOV document.
+  # D5 (fixed in 0.2.2): both no-evidence inputs now return the uniform
+  # prior, a valid distribution summing to 1.
   let emptyDoc = transformLda(m, newSeq[string]())
-  assert emptyDoc == @[0.0, 0.0], "BUG(PINNED) D5: empty doc yields an all-zero 'distribution'"
+  assert emptyDoc.len == 2, "empty fold-in length"
+  assert abs(emptyDoc[0] - 0.5) < 1e-9 and abs(emptyDoc[1] - 0.5) < 1e-9 and
+    abs(sum(emptyDoc) - 1.0) < 1e-9,
+    "D5 fixed: empty doc folds in as a no-evidence uniform distribution"
 
   # Out-of-range accessors return empty rather than raising.
   assert m.topTerms(0, 0).len == 0, "topTerms n=0"
@@ -272,11 +301,15 @@ proc testStopwordEdges() =
   assert wordTokenize("the and cat").removeStopWords("ENGLISH") == @["cat"],
     "language overload accepts uppercase language"
 
-  # BUG(PINNED) D4: the custom-set overload lowercases the token but uses the
-  # caller's set verbatim, so a set of uppercase words never matches despite
-  # the "case-insensitive" doc comment.
+  # D4 (resolved in 0.2.2): the doc now states the set must be lowercase.
+  # An uppercase set never matches — this is documented behavior, not a bug.
   assert wordTokenize("the and cat").removeStopWords(toHashSet(["THE", "And"])) ==
-    @["the", "and", "cat"], "BUG(PINNED) D4: uppercase custom set matches nothing"
+    @["the", "and", "cat"],
+    "D4: uppercase custom set matches nothing (set must be lowercase)"
+  # Tokens themselves are lowercased before comparison, so mixed-case tokens
+  # still match a lowercase set, and casing is preserved in the output.
+  assert @["The", "AND", "Cat"].removeStopWords(toHashSet(["the", "and"])) ==
+    @["Cat"], "mixed-case tokens match a lowercase set"
 
   # A pre-lowercased custom set behaves as documented.
   assert wordTokenize("the and cat").removeStopWords(toHashSet(["the", "and"])) ==

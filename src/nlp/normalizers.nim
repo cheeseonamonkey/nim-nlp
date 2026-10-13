@@ -152,22 +152,31 @@ proc isEmailChar(ch: char): bool =
 
 proc emailSpanAt(text: string, pos: int): int =
   ## If an email-like span starts at `pos`, return its length, else 0.
-  ## Local part: one or more isEmailChar; then '@'; then domain with a dot.
+  ## Local part: one or more isEmailChar; then '@'; then domain that must
+  ## contain a dot separating a non-empty host part from a non-empty TLD
+  ## (checked *after* trailing dots are trimmed, so "a@." is not an email).
   var j = pos
   while j < text.len and isEmailChar(text[j]):
     inc j
   if j == pos or j >= text.len or text[j] != '@': return 0
   if j + 1 >= text.len or not isEmailChar(text[j + 1]): return 0
   var k = j + 1
-  var hasDot = false
   while k < text.len and isEmailChar(text[k]):
-    if text[k] == '.': hasDot = true
     inc k
-  if not hasDot: return 0
   # Trim trailing dots (e.g. "a@b.com." → "a@b.com").
   while k > j + 1 and text[k - 1] == '.':
     dec k
-  if text[k - 1] == '.': return 0
+  # The trimmed domain must still be host.tld with both parts non-empty:
+  # a dot at index d qualifies when d > j+1 (host part not empty) and
+  # d < k-1 (TLD part not empty).
+  var dot = false
+  var d = j + 2
+  while d < k - 1:
+    if text[d] == '.':
+      dot = true
+      break
+    inc d
+  if not dot: return 0
   k - pos
 
 proc isUrlStart(text: string, i: int): bool =
@@ -214,16 +223,34 @@ proc isHtmlTag(text: string, i: int): bool =
   let c = text[i + 1]
   c == '/' or c == '!' or c == '?' or c.isAlphaAscii
 
+proc tagEnd(text: string, openIdx: int): int =
+  ## Index of the '>' that closes the tag opened at `openIdx`, or -1 if the
+  ## tag never closes. A '>' inside a quoted attribute value is literal
+  ## text until the matching quote closes (both " and ').
+  var quote = '\0'
+  var i = openIdx + 1
+  while i < text.len:
+    let ch = text[i]
+    if quote != '\0':
+      if ch == quote: quote = '\0'
+    elif ch == '"' or ch == '\'':
+      quote = ch
+    elif ch == '>':
+      return i
+    inc i
+  -1
+
 proc normalize*(n: HtmlStripper, text: string): string =
   ## Strip HTML/XML tags. Only spans that look like tags are removed
-  ## ("<" followed by '/', '!', '?', or a letter, then up to next '>').
+  ## ("<" followed by '/', '!', '?', or a letter, then up to the closing
+  ## '>', where a '>' inside a quoted attribute value is literal text).
   ## Bare "a < b" / unclosed '<' is left as literal text.
   if text.len == 0: return ""
   result = newStringOfCap(text.len)
   var i = 0
   while i < text.len:
     if text[i] == '<' and isHtmlTag(text, i):
-      let closeIdx = text.find('>', i + 1)
+      let closeIdx = tagEnd(text, i)
       if closeIdx == -1:
         result.add(text[i])
         inc i
