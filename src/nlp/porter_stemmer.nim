@@ -9,6 +9,10 @@ type
   PorterStemmer* = object
     ## Classic Porter stemmer for English
 
+  SuffixRule = tuple[suffix: string, repl: string, prevIn: set[char]]
+    ## One suffix-stripping rule.  ``prevIn``, when non-empty, restricts the
+    ## replacement to stems whose last character is in the given set.
+
 # ============================================================
 # Internal helpers
 # ============================================================
@@ -53,12 +57,44 @@ proc cvc(s: string): bool =
   elif s[^1] in {'w', 'x', 'y'}: false
   else: true
 
-proc replaceEnding(s: string, oldLen: int, newSuffix: string): string =
-  ## Replace the last `oldLen` characters with `newSuffix`.
-  ## If oldLen >= s.len, returns just newSuffix.
-  if oldLen >= s.len:
-    return newSuffix
-  s[0..^(oldLen + 1)] & newSuffix
+proc applySuffixRules(s: string, rules: openArray[SuffixRule]): string =
+  ## Apply the first matching suffix rule.  Even when the matching rule's guard
+  ## (`prevIn`) rejects the stem, the scan stops and the input is returned
+  ## unchanged; later rules are deliberately not tried.
+  for r in rules:
+    if s.endsWith(r.suffix):
+      let stem = s[0 ..< s.len - r.suffix.len]
+      if r.prevIn == {} or (stem.len > 0 and stem[^1] in r.prevIn):
+        return stem & r.repl
+      return s
+  s
+
+const
+  ## Step 2 rules, in the original first-match order.
+  porterStep2Rules: array[20, SuffixRule] = [
+    ("ational", "ate", {}), ("tional", "tion", {}), ("enci", "ence", {}),
+    ("anci", "ance", {}), ("izer", "ize", {}), ("abli", "able", {}),
+    ("alli", "al", {}), ("entli", "ent", {}), ("eli", "e", {}),
+    ("ousli", "ous", {}), ("ization", "ize", {}), ("ation", "ate", {}),
+    ("ator", "ate", {}), ("alism", "al", {}), ("iveness", "ive", {}),
+    ("fulness", "ful", {}), ("ousness", "ous", {}), ("aliti", "al", {}),
+    ("iviti", "ive", {}), ("biliti", "ble", {})]
+
+  ## Step 3 rules, in the original first-match order.
+  porterStep3Rules: array[7, SuffixRule] = [
+    ("icate", "ic", {}), ("ative", "", {}), ("alize", "al", {}),
+    ("iciti", "ic", {}), ("ical", "ic", {}), ("ful", "", {}),
+    ("ness", "", {})]
+
+  ## Step 4 rules, in the original first-match order.  The "ion" rule is
+  ## guarded on the character preceding the suffix.
+  porterStep4Rules: array[19, SuffixRule] = [
+    ("al", "", {}), ("ance", "", {}), ("ence", "", {}), ("er", "", {}),
+    ("ic", "", {}), ("able", "", {}), ("ible", "", {}), ("ant", "", {}),
+    ("ement", "", {}), ("ment", "", {}), ("ent", "", {}),
+    ("ion", "", {'s', 't'}), ("ou", "", {}), ("ism", "", {}),
+    ("ate", "", {}), ("iti", "", {}), ("ous", "", {}), ("ive", "", {}),
+    ("ize", "", {})]
 
 # ============================================================
 # Porter steps
@@ -106,64 +142,19 @@ proc step2(s: string): string =
   result = s
   if result.len < 3: return
   if measure(result[0..^2]) == 0: return
-  if result.endsWith("ational"): result = replaceEnding(result, 7, "ate")
-  elif result.endsWith("tional"): result = replaceEnding(result, 6, "tion")
-  elif result.endsWith("enci"): result = replaceEnding(result, 4, "ence")
-  elif result.endsWith("anci"): result = replaceEnding(result, 4, "ance")
-  elif result.endsWith("izer"): result = replaceEnding(result, 4, "ize")
-  elif result.endsWith("abli"): result = replaceEnding(result, 4, "able")
-  elif result.endsWith("alli"): result = replaceEnding(result, 4, "al")
-  elif result.endsWith("entli"): result = replaceEnding(result, 5, "ent")
-  elif result.endsWith("eli"): result = replaceEnding(result, 3, "e")
-  elif result.endsWith("ousli"): result = replaceEnding(result, 5, "ous")
-  elif result.endsWith("ization"): result = replaceEnding(result, 7, "ize")
-  elif result.endsWith("ation"): result = replaceEnding(result, 5, "ate")
-  elif result.endsWith("ator"): result = replaceEnding(result, 4, "ate")
-  elif result.endsWith("alism"): result = replaceEnding(result, 5, "al")
-  elif result.endsWith("iveness"): result = replaceEnding(result, 7, "ive")
-  elif result.endsWith("fulness"): result = replaceEnding(result, 7, "ful")
-  elif result.endsWith("ousness"): result = replaceEnding(result, 7, "ous")
-  elif result.endsWith("aliti"): result = replaceEnding(result, 5, "al")
-  elif result.endsWith("iviti"): result = replaceEnding(result, 5, "ive")
-  elif result.endsWith("biliti"): result = replaceEnding(result, 6, "ble")
+  result = applySuffixRules(result, porterStep2Rules)
 
 proc step3(s: string): string =
   result = s
   if result.len < 3: return
   if measure(result[0..^2]) == 0: return
-  if result.endsWith("icate"): result = replaceEnding(result, 5, "ic")
-  elif result.endsWith("ative"): result = replaceEnding(result, 5, "")
-  elif result.endsWith("alize"): result = replaceEnding(result, 5, "al")
-  elif result.endsWith("iciti"): result = replaceEnding(result, 5, "ic")
-  elif result.endsWith("ical"): result = replaceEnding(result, 4, "ic")
-  elif result.endsWith("ful"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ness"): result = replaceEnding(result, 4, "")
+  result = applySuffixRules(result, porterStep3Rules)
 
 proc step4(s: string): string =
   result = s
   if result.len < 3: return
   if measure(result[0..^2]) < 2: return
-  if result.endsWith("al"): result = replaceEnding(result, 2, "")
-  elif result.endsWith("ance"): result = replaceEnding(result, 4, "")
-  elif result.endsWith("ence"): result = replaceEnding(result, 4, "")
-  elif result.endsWith("er"): result = replaceEnding(result, 2, "")
-  elif result.endsWith("ic"): result = replaceEnding(result, 2, "")
-  elif result.endsWith("able"): result = replaceEnding(result, 4, "")
-  elif result.endsWith("ible"): result = replaceEnding(result, 4, "")
-  elif result.endsWith("ant"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ement"): result = replaceEnding(result, 5, "")
-  elif result.endsWith("ment"): result = replaceEnding(result, 4, "")
-  elif result.endsWith("ent"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ion"):
-    if result.len >= 4 and result[^4] in {'s', 't'}:
-      result = replaceEnding(result, 3, "")
-  elif result.endsWith("ou"): result = replaceEnding(result, 2, "")
-  elif result.endsWith("ism"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ate"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("iti"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ous"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ive"): result = replaceEnding(result, 3, "")
-  elif result.endsWith("ize"): result = replaceEnding(result, 3, "")
+  result = applySuffixRules(result, porterStep4Rules)
 
 proc step5a(s: string): string =
   result = s

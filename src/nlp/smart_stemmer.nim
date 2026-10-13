@@ -53,6 +53,67 @@ proc cvc(s: string): bool =
   elif s[^1] in {'w', 'x', 'y'}: false
   else: true
 
+type
+  SuffixRule = tuple[suffix: string, repl: string, minMeasure: int, prevIn: set[char]]
+    ## One suffix-stripping rule.  ``minMeasure`` is the strict lower bound on
+    ## the stem's ``measure``; ``prevIn``, when non-empty, additionally requires
+    ## the stem's last character to be in the given set.
+
+proc applySuffixRules(s: string, rules: openArray[SuffixRule]): string =
+  ## Apply the first matching suffix rule.  Even when the matching rule's guard
+  ## rejects the stem, the scan stops and the input is returned unchanged;
+  ## later rules are deliberately not tried.
+  for r in rules:
+    if s.endsWith(r.suffix):
+      let stem = s[0 ..< s.len - r.suffix.len]
+      if stem.len > 0 and measure(stem) > r.minMeasure and
+         (r.prevIn == {} or stem[^1] in r.prevIn):
+        return stem & r.repl
+      return s
+  s
+
+proc applyEdIngStem(stem: string): string =
+  ## Shared post-processing for the -ed and -ing branches of step 1.
+  result = stem
+  if result.endsWith("at") or result.endsWith("bl") or result.endsWith("iz"):
+    result.add("e")
+  elif endsDoubleConsonant(result) and result[^1] notin {'l', 's', 'z'}:
+    result = result[0..^2]
+  elif measure(result) == 1 and cvc(result):
+    result.add("e")
+
+const
+  ## Smart step 3 rules, in the original first-match order.
+  smartStep3Rules: array[21, SuffixRule] = [
+    ("ational", "ate", 0, {}), ("tional", "tion", 0, {}),
+    ("enci", "ence", 0, {}), ("anci", "ance", 0, {}),
+    ("izer", "ize", 0, {}), ("abli", "able", 0, {}),
+    ("alli", "al", 0, {}), ("entli", "ent", 0, {}),
+    ("eli", "e", 0, {}), ("ousli", "ous", 0, {}),
+    ("ization", "ize", 0, {}), ("ation", "ate", 0, {}),
+    ("ator", "ate", 0, {}), ("alism", "al", 0, {}),
+    ("iveness", "ive", 0, {}), ("fulness", "ful", 0, {}),
+    ("ousness", "ous", 0, {}), ("aliti", "al", 0, {}),
+    ("iviti", "ive", 0, {}), ("biliti", "ble", 0, {}),
+    ("logi", "log", 0, {})]
+
+  ## Smart step 4 rules, in the original first-match order.
+  smartStep4Rules: array[7, SuffixRule] = [
+    ("icate", "ic", 0, {}), ("ative", "", 0, {}), ("alize", "al", 0, {}),
+    ("iciti", "ic", 0, {}), ("ical", "ic", 0, {}), ("ful", "", 0, {}),
+    ("ness", "", 0, {})]
+
+  ## Smart step 5 rules, in the original first-match order.  The final "y"
+  ## rule needs a stricter measure bound and rewrites to "i".
+  smartStep5Rules: array[19, SuffixRule] = [
+    ("ement", "e", 0, {}), ("ment", "", 0, {}), ("able", "", 0, {}),
+    ("ible", "", 0, {}), ("ant", "", 0, {}), ("ent", "", 0, {}),
+    ("ism", "", 0, {}), ("ate", "", 0, {}), ("iti", "", 0, {}),
+    ("ous", "", 0, {}), ("ive", "", 0, {}), ("ize", "", 0, {}),
+    ("ion", "", 0, {'s', 't'}), ("er", "", 0, {}), ("ed", "", 0, {}),
+    ("ing", "", 0, {}), ("ly", "", 0, {}), ("al", "", 0, {}),
+    ("y", "i", 1, {})]
+
 # ============================================================
 # Smart plural detection
 # ============================================================
@@ -153,176 +214,23 @@ proc stem*(s: SmartStemmer, word: string): string =
     if measure(stem) > 0: result = stem & "ee"
   elif result.endsWith("ed"):
     let stem = result[0..^3]
-    if hasVowel(stem):
-      result = stem
-      if result.endsWith("at") or result.endsWith("bl") or result.endsWith("iz"):
-        result.add("e")
-      elif endsDoubleConsonant(result) and result[^1] notin {'l', 's', 'z'}:
-        result = result[0..^2]
-      elif measure(result) == 1 and cvc(result):
-        result.add("e")
+    if hasVowel(stem): result = applyEdIngStem(stem)
   elif result.endsWith("ing"):
     let stem = result[0..^4]
-    if hasVowel(stem):
-      result = stem
-      if result.endsWith("at") or result.endsWith("bl") or result.endsWith("iz"):
-        result.add("e")
-      elif endsDoubleConsonant(result) and result[^1] notin {'l', 's', 'z'}:
-        result = result[0..^2]
-      elif measure(result) == 1 and cvc(result):
-        result.add("e")
+    if hasVowel(stem): result = applyEdIngStem(stem)
 
   # Step 2: Handle -y (skip if already handled by plural detection)
   if not alreadyHandledY and originalEndedInY and result.endsWith("y") and hasVowel(result[0..^2]):
     result = result[0..^2] & "i"
 
   # Step 3: Handle -ational, -tional, etc.
-  if result.endsWith("ational"):
-    let stem = result[0..^8]
-    if measure(stem) > 0: result = stem & "ate"
-  elif result.endsWith("tional"):
-    let stem = result[0..^7]
-    if measure(stem) > 0: result = stem & "tion"
-  elif result.endsWith("enci"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "ence"
-  elif result.endsWith("anci"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "ance"
-  elif result.endsWith("izer"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "ize"
-  elif result.endsWith("abli"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "able"
-  elif result.endsWith("alli"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "al"
-  elif result.endsWith("entli"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "ent"
-  elif result.endsWith("eli"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem & "e"
-  elif result.endsWith("ousli"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "ous"
-  elif result.endsWith("ization"):
-    let stem = result[0..^8]
-    if measure(stem) > 0: result = stem & "ize"
-  elif result.endsWith("ation"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "ate"
-  elif result.endsWith("ator"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "ate"
-  elif result.endsWith("alism"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "al"
-  elif result.endsWith("iveness"):
-    let stem = result[0..^8]
-    if measure(stem) > 0: result = stem & "ive"
-  elif result.endsWith("fulness"):
-    let stem = result[0..^8]
-    if measure(stem) > 0: result = stem & "ful"
-  elif result.endsWith("ousness"):
-    let stem = result[0..^8]
-    if measure(stem) > 0: result = stem & "ous"
-  elif result.endsWith("aliti"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "al"
-  elif result.endsWith("iviti"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "ive"
-  elif result.endsWith("biliti"):
-    let stem = result[0..^7]
-    if measure(stem) > 0: result = stem & "ble"
-  elif result.endsWith("logi"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "log"
+  result = applySuffixRules(result, smartStep3Rules)
 
   # Step 4: Handle -icate, -ative, etc.
-  if result.endsWith("icate"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "ic"
-  elif result.endsWith("ative"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("alize"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "al"
-  elif result.endsWith("iciti"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "ic"
-  elif result.endsWith("ical"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem & "ic"
-  elif result.endsWith("ful"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ness"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem
+  result = applySuffixRules(result, smartStep4Rules)
 
   # Step 5: Handle -ement, -ment, etc.
-  if result.endsWith("ement"):
-    let stem = result[0..^6]
-    if measure(stem) > 0: result = stem & "e"
-  elif result.endsWith("ment"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("able"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ible"):
-    let stem = result[0..^5]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ant"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ent"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ism"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ate"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("iti"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ous"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ive"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ize"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ion"):
-    let stem = result[0..^4]
-    if measure(stem) > 0 and stem.len > 0 and stem[^1] in {'s', 't'}:
-      result = stem
-  elif result.endsWith("er"):
-    let stem = result[0..^3]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ed"):
-    let stem = result[0..^3]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ing"):
-    let stem = result[0..^4]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("ly"):
-    let stem = result[0..^3]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("al"):
-    let stem = result[0..^3]
-    if measure(stem) > 0: result = stem
-  elif result.endsWith("y"):
-    let stem = result[0..^2]
-    if measure(stem) > 1: result = stem & "i"
+  result = applySuffixRules(result, smartStep5Rules)
 
   # Step 6: Handle final -e
   if result.endsWith("e"):
