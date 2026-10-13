@@ -18,10 +18,13 @@ It is implemented in pure Nim and targets Nim 2.x.
 - BM25 retrieval with configurable `k1` and `b`
 - LDA topic modeling (collapsed Gibbs) with perplexity and coherence (UMass / c_v)
 - Sparse vectors and vocabularies
-- CSV-maintained linguistic data embedded at compile time
+- Compile-time constant linguistic data (no shipped data files)
 - No runtime data files and no external runtime dependencies
 
 ## Installation
+
+The repository is named `nim-nlp`; the Nimble package name and the import name
+are both `nlp`.
 
 ```bash
 nimble install nlp
@@ -89,21 +92,21 @@ let similarity = cosineSimilarityBags(
 
 ## Linguistic data
 
-The editable source lists are in `data/`:
+The built-in linguistic data (stopword lists, irregular plurals, irregular
+verbs, and no-change words) is compiled into the library as constants in
+`src/nlp/private/lexicon.nim`. That file is the editable source of truth: change
+it and rebuild to change the built-in lists.
 
-- `stopwords.csv`
-- `irregular_plurals.csv`
-- `irregular_verbs.csv`
-- `no_change_words.csv`
-
-They are embedded during compilation and parsed with Nim's standard `parsecsv`
-module. The project does not bundle an arbitrary global English frequency corpus;
-frequency data varies by corpus and language variety.
+No data files are shipped or required at install, compile, or run time. The
+project does not bundle an arbitrary global English frequency corpus; frequency
+data varies by corpus and language variety.
 
 ## Development
 
 ```bash
-nimble test
+nimble test                 # run the split test suite
+./scripts/install-smoke.sh  # install into an isolated NIMBLE_DIR and compile a
+                            # standalone consumer against the installed package
 ```
 
 Contributions are welcome. Please keep the library dependency-free, add tests

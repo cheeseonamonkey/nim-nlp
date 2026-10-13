@@ -27,6 +27,11 @@ proc documentFrequency*(documents: seq[seq[string]]): Table[string, int] =
         seen.incl(tok)
         result[tok] = result.getOrDefault(tok, 0) + 1
 
+proc idfSmoothed*(df: int, numDocs: int): float =
+  ## Smoothed inverse document frequency: ln(1 + N / df).
+  ## Returns 0.0 when the term appears in no document.
+  if df == 0: 0.0 else: ln(1.0 + numDocs.float / df.float)
+
 proc sortedTermsByFrequency*(freqs: Table[string, int]): seq[(string, int)] =
   ## Sort terms by frequency descending.
   var pairs = newSeq[(string, int)]()
@@ -141,14 +146,13 @@ proc extractKeywords*(
   case methodName.toLowerAscii():
   of "tfidf":
     let df = documentFrequency(documents)
-    let n = documents.len.float
     var scores = initTable[string, float]()
     for doc in documents:
       let tf = termFrequencies(doc)
       if tf.len == 0: continue
       let mtf = max(tf.values.toSeq())
       for term, freq in tf:
-        let idf = ln(1.0 + n / df.getOrDefault(term, 1).float)
+        let idf = idfSmoothed(df.getOrDefault(term, 1), documents.len)
         let tfWeight = 0.5 + 0.5 * (freq.float / mtf.float)
         scores[term] = scores.getOrDefault(term, 0.0) + tfWeight * idf
     var pairs = newSeq[(string, float)]()
