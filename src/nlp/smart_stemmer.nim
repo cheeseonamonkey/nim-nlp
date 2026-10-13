@@ -8,9 +8,9 @@ import std/[tables, strutils, sequtils, sets]
 import ./csv_data
 
 const
-  irregularPluralsData = staticRead("../../data/irregular_plurals.csv")
-  irregularVerbsData = staticRead("../../data/irregular_verbs.csv")
-  noChangeWordsData = staticRead("../../data/no_change_words.csv")
+  irregularPluralsData = staticRead("data/irregular_plurals.csv")
+  irregularVerbsData = staticRead("data/irregular_verbs.csv")
+  noChangeWordsData = staticRead("data/no_change_words.csv")
 
 proc loadPairTable(data, filename: string): Table[string, string] =
   result = initTable[string, string]()

@@ -9,7 +9,7 @@ import ./csv_data
 type
   StopWords* = HashSet[string]
 
-const stopwordsData = staticRead("../../data/stopwords.csv")
+const stopwordsData = staticRead("data/stopwords.csv")
 
 proc loadStopWords(language: string): StopWords =
   result = initHashSet[string]()
