@@ -11,11 +11,12 @@
 ##
 ## Known defects recorded here:
 ##
-##   D1  BM25 drops every hit whose probabilistic IDF is <= 0. A term present
-##       in about half the corpus or more scores nothing at all, so
-##       `fitBm25(@["a b", "b c"]).searchBm25(@["b"])` returns @[] even though
-##       document 0 clearly contains "b". TfidfModel does not have this
-##       problem, so the two retrieval models disagree on the same corpus.
+##   D1  (fixed in 0.2.1) BM25's probabilistic IDF collapsed to zero for
+##       terms present in about half the corpus or more, and the `score > 0`
+##       filter then silently dropped every hit — searching for a common word
+##       returned nothing at all. The weight is now shifted by +1 inside the
+##       logarithm so it stays strictly positive. The retrieval section below
+##       asserts the corrected behavior.
 ##   D2  `normalizeReplaceEmails("a@.")` yields "<email>." — "a@" is not an
 ##       email. The trailing-dot trim removes the very dot that satisfied the
 ##       dot-in-domain requirement, and the span is reported anyway.
@@ -138,27 +139,41 @@ proc testRetrievalEdges() =
   let docs = @[wordTokenize("a b"), wordTokenize("b c")]
   let bm = fitBm25(docs)
 
-  # BUG(PINNED) D1: probabilistic IDF is <= 0 for common terms, and hits with
-  # non-positive scores are dropped. "b" is in both documents; "a" is in
-  # exactly half, where the smoothed-probability IDF is exactly 0.
-  assert bm.searchBm25(wordTokenize("b")) == @[],
-    "BUG(PINNED) D1: BM25 drops a term present in every document"
-  assert bm.searchBm25(wordTokenize("a")) == @[],
-    "BUG(PINNED) D1: BM25 drops a term present in half the documents"
+  # D1 (fixed in 0.2.1): common terms are found again. "b" is in every
+  # document, and the equal scores tie-break by ascending docId.
+  let commonHits = bm.searchBm25(wordTokenize("b"))
+  assert commonHits.len == 2, "BM25 finds a term present in every document"
+  assert commonHits[0][0] == 0 and commonHits[1][0] == 1, "BM25 tie-break by docId"
+  assert commonHits[0][1] > 0.0 and commonHits[1][1] > 0.0,
+    "BM25 common-term scores stay positive"
+  assert abs(commonHits[0][1] - 0.1823215567939546) < 1e-9,
+    "BM25 common-term score " & $commonHits[0][1]
 
-  # The same corpus and query rank fine under TF-IDF, which uses a smoothed
-  # (always positive) IDF. The models disagree; this contrast is the point.
+  # A term present in half the documents is also found, and only the matching
+  # document is returned.
+  let halfHits = bm.searchBm25(wordTokenize("a"))
+  assert halfHits.len == 1 and halfHits[0][0] == 0,
+    "BM25 finds a term present in half the corpus"
+  assert abs(halfHits[0][1] - 0.6931471805599453) < 1e-9,
+    "BM25 half-corpus score " & $halfHits[0][1]
+
+  # Repeating a query term still increases the score.
+  let doubled = bm.searchBm25(wordTokenize("b b"))
+  assert doubled[0][1] > commonHits[0][1], "BM25 query frequency increases score"
+
+  # TF-IDF agrees that the term is present; both models now find it.
   let tfHits = fitTfidf(docs).searchTfidf(wordTokenize("b"))
   assert tfHits.len == 2, "tfidf finds the common term in both documents"
   assert tfHits[0][1] > 0.0 and tfHits[1][1] > 0.0, "tfidf scores stay positive"
 
-  # A rare term in a larger corpus does score, so BM25 is not simply broken.
+  # A rare term in a larger corpus keeps a larger weight than a common one.
   let bm5 = fitBm25(@[
     wordTokenize("zzz a"), wordTokenize("b c"), wordTokenize("d e"),
     wordTokenize("f g"), wordTokenize("h i")])
   let rare = bm5.searchBm25(wordTokenize("zzz"))
   assert rare.len == 1 and rare[0][0] == 0, "rare term found"
-  assert abs(rare[0][1] - 1.0986122886681098) < 1e-9, "rare term idf " & $rare[0][1]
+  assert abs(rare[0][1] - 1.3862943611198906) < 1e-9, "rare term idf " & $rare[0][1]
+  assert rare[0][1] > commonHits[0][1], "rare terms outweigh common ones"
 
   # Empty corpus: average length is zero and search is a no-op, not a crash
   # or a division by zero.
@@ -172,6 +187,10 @@ proc testRetrievalEdges() =
     discard bm.searchBm25(wordTokenize("a"), k1 = -1.0)
   doAssertRaises(ValueError):
     discard bm.searchBm25(wordTokenize("a"), b = 1.5)
+  doAssertRaises(ValueError):
+    discard bm.searchBm25(wordTokenize("a"), b = NaN)
+  doAssertRaises(ValueError):
+    discard bm.searchBm25(wordTokenize("a"), k1 = NaN)
 
   # Vocabulary construction agrees between the two models.
   assert fitCounts(docs).vocabulary.len == fitTfidf(docs).vocabulary.len,
