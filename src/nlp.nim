@@ -9,6 +9,7 @@ import nlp/analysis
 import nlp/embeddings
 import nlp/bow
 import nlp/topics
+import nlp/coherence
 import nlp/types
 
 export tokenize
@@ -20,4 +21,5 @@ export analysis
 export embeddings
 export bow
 export topics
+export coherence
 export types

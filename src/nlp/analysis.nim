@@ -8,6 +8,7 @@
 ## - Keyword extraction
 
 import std/[tables, math, algorithm, sets, sequtils, strutils]
+import private/model_utils
 
 # ============================================================
 # Frequency analysis
@@ -33,14 +34,11 @@ proc idfSmoothed*(df: int, numDocs: int): float =
   if df == 0: 0.0 else: ln(1.0 + numDocs.float / df.float)
 
 proc sortedTermsByFrequency*(freqs: Table[string, int]): seq[(string, int)] =
-  ## Sort terms by frequency descending.
+  ## Sort terms by frequency descending (tie-break: term ascending).
   var pairs = newSeq[(string, int)]()
   for term, freq in freqs:
     pairs.add((term, freq))
-  pairs.sort(proc(a, b: (string, int)): int =
-    if a[1] == b[1]: cmp(a[0], b[0])
-    else: cmp(b[1], a[1]))
-  result = pairs
+  topScored(pairs, pairs.len)
 
 # ============================================================
 # Similarity measures
@@ -143,10 +141,11 @@ proc extractKeywords*(
   ## - `"freq"`: Simple frequency-based extraction
   if documents.len == 0 or topN <= 0:
     return newSeq[(string, float)]()
+  var scores: Table[string, float]
   case methodName.toLowerAscii():
   of "tfidf":
     let df = documentFrequency(documents)
-    var scores = initTable[string, float]()
+    scores = initTable[string, float]()
     for doc in documents:
       let tf = termFrequencies(doc)
       if tf.len == 0: continue
@@ -155,30 +154,14 @@ proc extractKeywords*(
         let idf = idfSmoothed(df.getOrDefault(term, 1), documents.len)
         let tfWeight = 0.5 + 0.5 * (freq.float / mtf.float)
         scores[term] = scores.getOrDefault(term, 0.0) + tfWeight * idf
-    var pairs = newSeq[(string, float)]()
-    for term, score in scores:
-      pairs.add((term, score))
-    pairs.sort(proc(a, b: (string, float)): int =
-      if a[1] == b[1]: cmp(a[0], b[0])
-      else: cmp(b[1], a[1]))
-    if pairs.len > topN:
-      result = pairs[0..<topN]
-    else:
-      result = pairs
   of "freq":
-    var combined = initTable[string, int]()
+    scores = initTable[string, float]()
     for doc in documents:
       for term in doc:
-        combined[term] = combined.getOrDefault(term, 0) + 1
-    var pairs = newSeq[(string, float)]()
-    for term, freq in combined:
-      pairs.add((term, freq.float))
-    pairs.sort(proc(a, b: (string, float)): int =
-      if a[1] == b[1]: cmp(a[0], b[0])
-      else: cmp(b[1], a[1]))
-    if pairs.len > topN:
-      result = pairs[0..<topN]
-    else:
-      result = pairs
+        scores[term] = scores.getOrDefault(term, 0.0) + 1.0
   else:
-    result = newSeq[(string, float)]()
+    return newSeq[(string, float)]()
+  var pairs = newSeq[(string, float)]()
+  for term, score in scores:
+    pairs.add((term, score))
+  result = topScored(pairs, topN)
