@@ -11,9 +11,10 @@
 ## dependencies. Mirrors the TF-IDF/BM25 call shape (`fit*`, `transform*`,
 ## `search*`, `topK`) for familiarity.
 
-import std/[tables, algorithm]
+import std/tables
 import types
 import analysis
+import private/model_utils
 
 type
   CountModel* = object
@@ -25,27 +26,6 @@ type
     documentTermFrequencies*: seq[Table[string, int]]
     documentFrequencies*: Table[string, int]
 
-proc buildVocab(docs: seq[seq[string]]): Vocabulary =
-  result = newVocabulary()
-  for doc in docs:
-    for term in doc:
-      discard result.add(term)
-
-proc buildTermFrequencyTables(
-  docs: seq[seq[string]]
-): seq[Table[string, int]] =
-  result = newSeq[Table[string, int]](docs.len)
-  for i, doc in docs:
-    result[i] = termFrequencies(doc)
-
-proc topScores(
-  scores: var seq[(int, float)], topK: int
-): seq[(int, float)] =
-  scores.sort(proc(a, b: (int, float)): int =
-    if a[1] == b[1]: cmp(a[0], b[0])
-    else: cmp(b[1], a[1]))
-  if scores.len > topK: scores[0..<topK] else: scores
-
 proc fitCounts*(
   documents: seq[seq[string]],
 ): CountModel =
@@ -55,9 +35,9 @@ proc fitCounts*(
     result.vocabulary = newVocabulary()
     result.numDocs = 0
     return
-  let vocab = buildVocab(documents)
+  let vocab = buildVocabulary(documents)
   let df = documentFrequency(documents)
-  let termFreqs = buildTermFrequencyTables(documents)
+  let termFreqs = termFrequencyTables(documents)
 
   result.vocabulary = vocab
   result.numDocs = documents.len
@@ -101,4 +81,4 @@ proc searchCounts*(
   for i, docVec in model.docVectors:
     let score = cosineSimilarity(queryVec, docVec)
     if score > 0: scores.add((i, score))
-  result = topScores(scores, topK)
+  result = rankTopK(scores, topK)

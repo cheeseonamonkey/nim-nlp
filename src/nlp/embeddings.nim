@@ -4,9 +4,10 @@
 ## - TfidfModel: TF-IDF vectorization with cosine similarity search
 ## - BM25Model: BM25 scoring with configurable k1, b parameters
 
-import std/[tables, math, algorithm]
+import std/[tables, math]
 import types
 import analysis
+import private/model_utils
 
 type
   TfidfModel* = object
@@ -37,41 +38,14 @@ proc maxTf(freqs: Table[string, int]): int =
   for _, tf in freqs:
     if tf > result: result = tf
 
-proc buildVocab(docs: seq[seq[string]]): Vocabulary =
-  ## Build vocabulary from pre-tokenized documents.
-  result = newVocabulary()
-  for doc in docs:
-    for term in doc:
-      discard result.add(term)
-
-proc computeIdf(df: int, numDocs: int): float =
-  ## Smoothed IDF: log(1 + N / df)
-  if df == 0: 0.0 else: ln(1.0 + numDocs.float / df.float)
-
 proc computeProbIdf(df: int, numDocs: int): float =
-  ## Probabilistic IDF: log((N - df + 0.5) / (df + 0.5))
+  ## Probabilistic IDF, shifted by +1 inside the logarithm (the form Lucene
+  ## uses for BM25). The shift keeps the weight strictly positive for terms
+  ## that occur in most or all documents; without it the weight collapses to
+  ## zero and `searchBm25` silently returns no hits for common terms.
   let n = numDocs.float
-  let d = df.float
-  if d >= n: 0.0 else: ln((n - d + 0.5) / (d + 0.5))
-
-proc buildTermFrequencyTables(
-  docs: seq[seq[string]]
-): seq[Table[string, int]] =
-  result = newSeq[Table[string, int]](docs.len)
-  for i, doc in docs:
-    result[i] = termFrequencies(doc)
-
-proc topScores(
-  scores: var seq[(int, float)], topK: int
-): seq[(int, float)] =
-  scores.sort(proc(a, b: (int, float)): int =
-    if a[1] == b[1]: cmp(a[0], b[0])
-    else: cmp(b[1], a[1]))
-  if scores.len > topK: scores[0..<topK] else: scores
-
-# ============================================================
-# TF-IDF
-# ============================================================
+  let d = min(df.float, n)
+  if d <= 0.0: 0.0 else: ln(1.0 + (n - d + 0.5) / (d + 0.5))
 
 proc fitTfidf*(
   documents: seq[seq[string]],
@@ -82,9 +56,9 @@ proc fitTfidf*(
     result.vocabulary = newVocabulary()
     result.numDocs = 0
     return
-  let vocab = buildVocab(documents)
+  let vocab = buildVocabulary(documents)
   let df = documentFrequency(documents)
-  let termFreqs = buildTermFrequencyTables(documents)
+  let termFreqs = termFrequencyTables(documents)
 
   result.vocabulary = vocab
   result.numDocs = documents.len
@@ -96,7 +70,7 @@ proc fitTfidf*(
   for termId in 0..<vocab.len:
     let term = vocab[termId]
     let docFreq = df.getOrDefault(term, 0)
-    result.idfValues[termId] = computeIdf(docFreq, documents.len)
+    result.idfValues[termId] = idfSmoothed(docFreq, documents.len)
 
   # Compute document vectors
   result.docVectors = newSeq[SparseVector](documents.len)
@@ -144,7 +118,7 @@ proc searchTfidf*(
   for i, docVec in model.docVectors:
     let score = cosineSimilarity(queryVec, docVec)
     if score > 0: scores.add((i, score))
-  result = topScores(scores, topK)
+  result = rankTopK(scores, topK)
 
 # ============================================================
 # BM25
@@ -160,7 +134,7 @@ proc fitBm25*(
     result.numDocs = 0
     result.avgDocLength = 0.0
     return
-  let vocab = buildVocab(documents)
+  let vocab = buildVocabulary(documents)
   var totalLen = 0
   for doc in documents:
     totalLen += doc.len
@@ -168,7 +142,7 @@ proc fitBm25*(
   result.vocabulary = vocab
   result.numDocs = documents.len
   result.tokenizedDocs = documents
-  result.documentTermFrequencies = buildTermFrequencyTables(documents)
+  result.documentTermFrequencies = termFrequencyTables(documents)
   result.documentFrequencies = documentFrequency(documents)
   if documents.len > 0:
     result.avgDocLength = totalLen.float / documents.len.float
@@ -184,11 +158,9 @@ proc searchBm25*(
   ## Returns empty results for empty query, empty model, or zero avgDocLength.
   if topK <= 0 or model.numDocs == 0 or query.len == 0: return
   if model.avgDocLength == 0.0: return
-  if k1 < 0.0 or b < 0.0 or b > 1.0:
+  if not (k1 >= 0.0) or not (b >= 0.0) or not (b <= 1.0):
     raise newException(ValueError, "BM25 requires k1 >= 0 and 0 <= b <= 1")
-  var queryFreqs = initTable[string, int]()
-  for term in query:
-    queryFreqs[term] = queryFreqs.getOrDefault(term, 0) + 1
+  let queryFreqs = termFrequencies(query)
 
   var scores = newSeq[(int, float)]()
 
@@ -210,4 +182,4 @@ proc searchBm25*(
 
     if score > 0: scores.add((docId, score))
 
-  result = topScores(scores, topK)
+  result = rankTopK(scores, topK)

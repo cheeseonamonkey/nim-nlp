@@ -17,3 +17,4 @@ jobs:
           nim-version: ${{ matrix.nim }}
       - run: nimble check
       - run: nimble test
+      - run: ./scripts/install-smoke.sh

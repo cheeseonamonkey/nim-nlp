@@ -44,21 +44,27 @@ type
 # Implementations
 # ============================================================
 
+template accumulateTokens(t: object, text: string, matches: untyped) =
+  ## Shared character-accumulation skeleton for tokenizers that scan a
+  ## string character by character. `matches` is evaluated with `ch` bound
+  ## to the current character; runs of matching characters become tokens.
+  if text.len != 0:
+    var current = ""
+    for ch {.inject.} in text:
+      if matches:
+        current.add(ch)
+      else:
+        if current.len > 0:
+          let tok = if t.lowercase: current.toLowerAscii() else: current
+          if tok.len >= t.minLength: result.add(tok)
+          current = ""
+    if current.len > 0:
+      let tok = if t.lowercase: current.toLowerAscii() else: current
+      if tok.len >= t.minLength: result.add(tok)
+
 proc tokenize*(t: WordTokenizer, text: string): seq[string] =
   ## Split text into alphanumeric words.
-  if text.len == 0: return
-  var current = ""
-  for ch in text:
-    if ch.isAlphaNumeric:
-      current.add(ch)
-    else:
-      if current.len > 0:
-        let tok = if t.lowercase: current.toLowerAscii() else: current
-        if tok.len >= t.minLength: result.add(tok)
-        current = ""
-  if current.len > 0:
-    let tok = if t.lowercase: current.toLowerAscii() else: current
-    if tok.len >= t.minLength: result.add(tok)
+  accumulateTokens(t, text, ch.isAlphaNumeric)
 
 proc matchPattern(t: PatternTokenizer, ch: char): bool =
   ## Check if a character matches the tokenizer's simple pattern.
@@ -77,19 +83,7 @@ proc matchPattern(t: PatternTokenizer, ch: char): bool =
 
 proc tokenize*(t: PatternTokenizer, text: string): seq[string] =
   ## Extract tokens matching a simple pattern (\w+, \d+, [chars]).
-  if text.len == 0: return
-  var current = ""
-  for ch in text:
-    if t.matchPattern(ch):
-      current.add(ch)
-    else:
-      if current.len > 0:
-        let tok = if t.lowercase: current.toLowerAscii() else: current
-        if tok.len >= t.minLength: result.add(tok)
-        current = ""
-  if current.len > 0:
-    let tok = if t.lowercase: current.toLowerAscii() else: current
-    if tok.len >= t.minLength: result.add(tok)
+  accumulateTokens(t, text, t.matchPattern(ch))
 
 proc tokenize*(t: WhitespaceTokenizer, text: string): seq[string] =
   ## Split on whitespace.

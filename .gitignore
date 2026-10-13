@@ -1,3 +1,5 @@
 .pi/
 nimcache/
 testresults/
+tests/t_*
+!tests/t_*.nim
