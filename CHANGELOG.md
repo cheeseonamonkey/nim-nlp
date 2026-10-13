@@ -1,10 +1,27 @@
 # Changelog
 
-## 0.2.2 (unreleased)
+## 0.2.3 (unreleased)
 
+- Split the coherence machinery (`coherenceUMass`, `coherenceCV`,
+  `topTermsByPMI`) out of `topics` into a new `coherence` module; the public
+  `import nlp` facade is unchanged, but code importing `nlp/topics` directly
+  now imports `nlp/coherence` for those three symbols.
+- Extracted the shared `topScored` ranking helper (score descending, key
+  ascending, truncate to N) and removed five duplicated copies across
+  `analysis`, `topics`, and `coherence`; unified the two `extractKeywords`
+  method tails.
+- Flattened the sentence-tokenizer scan loop and simplified `SparseVector`
+  `pairs`/`values` (no behavior change; overlarge differential checks pass).
+- Trimmed the edge-case suite to the pins that exist nowhere else (every
+  removed assertion verified as covered by another test file).
+- Documented the full public API surface in the README, corrected stale
+  normalizer comments (accent table coverage, ASCII-only punctuation, HTML
+  quote scanning, URL prefix policy, unused `ChainedNormalizer`), and added
+  coverage for the previously untested `uniqueTerms` and ranking sharp edges.
 - Fixed `normalizeReplaceEmails("a@.")` reporting an email span whose domain
   was emptied by the trailing-dot trim; the domain must still contain a dot
   separating a non-empty host from a non-empty TLD after the trim (D2).
+  Also fixed the same root cause for `"a@b."`.
 - Fixed `normalizeStripHtml` truncating a tag at a `>` inside a quoted
   attribute value (`<a href="x>y">z</a>`); quoted `>` is now literal text
   until the matching quote closes (D3).
@@ -12,7 +29,9 @@
   doc now states that tokens are lowercased but the caller's set is used
   verbatim and must contain lowercase entries (D4).
 - `transformLda` on an empty or fully out-of-vocabulary document now returns
-  the uniform prior (sums to 1) for both no-evidence inputs (D5).
+  the uniform prior (sums to 1) for both no-evidence inputs (D5). As a
+  consequence `transformLda` now validates `iterations` before the empty-doc
+  short-circuit, so `transformLda(m, @[], iterations = 0)` raises `ValueError`.
 
 ## 0.2.1
 
