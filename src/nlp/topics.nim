@@ -131,8 +131,72 @@ proc gibbsSweep(
       discard sampleTokenTopic(m, d, n, alpha, beta, V, rng, probs)
 
 # ============================================================
-# Fit — collapsed Gibbs
+# Fit phases — each is a named step of `fitLda`. Gibbs math lives in
+# `sampleTokenTopic`/`gibbsSweep` above and is untouched by this split.
+# RNG note: only `randomAssignTopics` and `runGibbsSweeps` consume the
+# RNG, in that order, exactly as the inline code did — seeded runs are
+# bit-identical to before.
 # ============================================================
+
+proc emptyLdaModel(
+  numTopics: int, alpha, beta: float, iterations: int, seed: int64
+): LdaModel =
+  ## Degenerate model for empty corpora: only `numDocs` is zeroed, the
+  ## requested topic count is retained.
+  result.vocabulary = newVocabulary()
+  result.numDocs = 0
+  result.numTopics = max(0, numTopics)
+  result.alpha = alpha
+  result.beta = beta
+  result.iterations = iterations
+  result.seed = seed
+
+proc mapDocTermIds(
+  m: var LdaModel, documents: seq[seq[string]], vocab: Vocabulary
+) =
+  ## Phase 1 — vocabulary/id mapping: docs to term-id seqs, OOV filtered.
+  let D = documents.len
+  m.docTokens = newSeq[seq[int]](D)
+  m.docLengths = newSeq[int](D)
+  for d, doc in documents:
+    var ids = newSeqOfCap[int](doc.len)
+    for term in doc:
+      let id = vocab.id(term)
+      if id >= 0:
+        ids.add(id)
+    m.docTokens[d] = ids
+    m.docLengths[d] = ids.len
+
+proc initCountTables(m: var LdaModel, D, K, V: int) =
+  ## Phase 2 — zeroed sufficient-statistic tables and assignment slots.
+  m.docTopicCounts = newSeq[seq[int]](D)
+  for d in 0 ..< D:
+    m.docTopicCounts[d] = newSeq[int](K)
+  m.topicWordCounts = newSeq[seq[int]](K)
+  for k in 0 ..< K:
+    m.topicWordCounts[k] = newSeq[int](V)
+  m.topicSums = newSeq[int](K)
+  m.assignments = newSeq[seq[int]](D)
+
+proc randomAssignTopics(m: var LdaModel, rng: var Rand) =
+  ## Phase 3 — random initial topic assignment (first RNG consumer).
+  for d in 0 ..< m.numDocs:
+    let Nd = m.docTokens[d].len
+    m.assignments[d] = newSeq[int](Nd)
+    for n in 0 ..< Nd:
+      let w = m.docTokens[d][n]
+      let k = rng.rand(m.numTopics - 1)
+      m.assignments[d][n] = k
+      addAssignment(m, d, w, k)
+
+proc runGibbsSweeps(
+  m: var LdaModel, alpha, beta: float, V: int, iterations: int,
+  rng: var Rand
+) =
+  ## Phase 4 — collapsed-Gibbs sweeps (second RNG consumer).
+  var probs = newSeq[float](m.numTopics)
+  for _ in 0 ..< iterations:
+    gibbsSweep(m, alpha, beta, V, rng, probs)
 
 proc fitLda*(
   documents: seq[seq[string]],
@@ -150,14 +214,7 @@ proc fitLda*(
   ## - `seed`: RNG seed for determinism.
   ## Returns an empty model when `documents` is empty or `numTopics <= 0`.
   if documents.len == 0 or numTopics <= 0:
-    result.vocabulary = newVocabulary()
-    result.numDocs = 0
-    result.numTopics = max(0, numTopics)
-    result.alpha = alpha
-    result.beta = beta
-    result.iterations = iterations
-    result.seed = seed
-    return
+    return emptyLdaModel(numTopics, alpha, beta, iterations, seed)
   if not (alpha > 0.0) or not (beta > 0.0):
     raise newException(ValueError, "LDA requires alpha > 0 and beta > 0")
   if iterations <= 0:
@@ -177,44 +234,12 @@ proc fitLda*(
   result.seed = seed
   result.tokenizedDocs = documents
 
-  # Map docs to term ids, filtering OOV (none, since vocab is from docs).
-  result.docTokens = newSeq[seq[int]](D)
-  result.docLengths = newSeq[int](D)
-  for d, doc in documents:
-    var ids: seq[int]
-    ids = newSeqOfCap[int](doc.len)
-    for term in doc:
-      let id = vocab.id(term)
-      if id >= 0:
-        ids.add(id)
-    result.docTokens[d] = ids
-    result.docLengths[d] = ids.len
-
-  result.docTopicCounts = newSeq[seq[int]](D)
-  for d in 0 ..< D:
-    result.docTopicCounts[d] = newSeq[int](K)
-  result.topicWordCounts = newSeq[seq[int]](K)
-  for k in 0 ..< K:
-    result.topicWordCounts[k] = newSeq[int](V)
-  result.topicSums = newSeq[int](K)
-  result.assignments = newSeq[seq[int]](D)
+  mapDocTermIds(result, documents, vocab)
+  initCountTables(result, D, K, V)
 
   var rng = initRand(seed)
-
-  # Random initial assignment.
-  for d in 0 ..< D:
-    let Nd = result.docTokens[d].len
-    result.assignments[d] = newSeq[int](Nd)
-    for n in 0 ..< Nd:
-      let w = result.docTokens[d][n]
-      let k = rng.rand(K - 1)
-      result.assignments[d][n] = k
-      addAssignment(result, d, w, k)
-
-  # Gibbs sweeps.
-  var probs = newSeq[float](K)
-  for _ in 0 ..< iterations:
-    gibbsSweep(result, alpha, beta, V, rng, probs)
+  randomAssignTopics(result, rng)
+  runGibbsSweeps(result, alpha, beta, V, iterations, rng)
 
   rebuildPhiTheta(result)
 

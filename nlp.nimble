@@ -1,6 +1,6 @@
-version       = "0.2.3"
+version       = "0.3.0"
 author        = "cheeseonamonkey"
-description   = "Dependency-free NLP toolkit for Nim: tokenization, normalization, stemming, TF-IDF, BM25, and text analysis"
+description   = "Dependency-free NLP toolkit for Nim: tokenization, normalization, stemming, n-grams, edit distance, TF-IDF, BM25, and text analysis"
 license       = "MIT"
 srcDir        = "src"
 

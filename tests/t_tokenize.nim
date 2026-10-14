@@ -38,6 +38,8 @@ proc testTokenizers() =
 
   # Whitespace tokenizer - empty
   assert whitespaceTokenize("") == @[], "whitespaceTokenize empty"
+  assert whitespaceTokenize("CAFÉ ÉCOLE") == @["café", "école"],
+    "whitespaceTokenize unicode lowercase"
 
   # Whitespace tokenizer - only whitespace
   assert whitespaceTokenize("   \t\n  ") == @[], "whitespaceTokenize only whitespace"
@@ -57,6 +59,8 @@ proc testTokenizers() =
   assert ngramTokenize("hello", -1) == @[], "ngramTokenize n<0"
   assert ngramTokenize("hello", 10) == @[], "ngramTokenize n>len"
   assert ngramTokenize("éab", 2) == @["éa", "ab"], "ngramTokenize unicode characters"
+  assert ngramTokenize("CAFÉ", 2) == @["ca", "af", "fé"],
+    "ngramTokenize unicode lowercase"
 
   # Sentence tokenizer
   let t7 = splitSentences("Hello world. How are you? I'm fine!")
@@ -99,17 +103,46 @@ proc testTokenizers() =
   assert t8b == @["e", "o"], "patternTokenizer char class"
 
   # Word n-grams
-  let t9 = wordTokenize("the quick brown fox").ngrams(2)
-  assert t9 == @["the quick", "quick brown", "brown fox"], "word ngrams"
+  let t9 = wordTokenize("the quick brown fox").bigrams()
+  assert t9 == @[@["the", "quick"], @["quick", "brown"], @["brown", "fox"]], "word ngrams"
 
   # Word n-grams - edge cases
-  assert wordTokenize("").ngrams(2) == @[], "word ngrams empty"
-  assert wordTokenize("hello").ngrams(2) == @[], "word ngrams too short"
-  assert wordTokenize("the quick").ngrams(0) == @[], "word ngrams n=0"
-  assert wordTokenize("the quick").ngrams(-1) == @[], "word ngrams n<0"
-  assert wordTokenize("the quick").ngrams(1) == @["the", "quick"], "word ngrams n=1"
+  assert wordTokenize("").bigrams() == @[], "word ngrams empty"
+  assert bigrams(wordTokenize("hello")) == @[], "word ngrams too short"
+  assert ngrams(wordTokenize("the quick"), 0) == @[], "word ngrams n=0"
+  assert ngrams(wordTokenize("the quick"), -1) == @[], "word ngrams n<0"
+  assert ngrams(wordTokenize("the quick"), 1) == @[@["the"], @["quick"]], "word ngrams n=1"
+  assert trigrams(wordTokenize("the quick brown fox")) ==
+    @[@["the", "quick", "brown"], @["quick", "brown", "fox"]], "word trigrams"
+
+  echo "  ALL PASS"
+
+proc testTokenizerHelpers() =
+  echo "=== Tokenizer helpers ==="
+
+  # flushToken: the shared drain step for character-scanning tokenizers.
+  var out1: seq[string] = @[]
+  flushToken("Hello", true, 1, out1)
+  assert out1 == @["hello"], "flushToken lowercases"
+  var out2: seq[string] = @[]
+  flushToken("Hello", false, 1, out2)
+  assert out2 == @["Hello"], "flushToken preserves case"
+  var out3: seq[string] = @[]
+  flushToken("", true, 1, out3)
+  assert out3 == @[], "flushToken drains nothing on empty run"
+  var out4: seq[string] = @[]
+  flushToken("a", true, 2, out4)
+  assert out4 == @[], "flushToken honors minLength"
+
+  # isSentenceBoundary: terminator only before whitespace or end of input.
+  assert isSentenceBoundary("Hi. There", 2), "boundary before space"
+  assert isSentenceBoundary("Hi.", 2), "boundary at end of input"
+  assert not isSentenceBoundary("Hi.\"x", 2), "no boundary before quote"
+  assert not isSentenceBoundary("abc", 1), "no boundary on plain char"
+  assert isSentenceBoundary("Wait?! Next", 5), "boundary on ! before space"
 
   echo "  ALL PASS"
 
 when isMainModule:
   testTokenizers()
+  testTokenizerHelpers()

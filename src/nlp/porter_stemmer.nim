@@ -3,7 +3,7 @@
 ## Based on the classic Porter Stemming Algorithm by Martin Porter (1980).
 ## https://tartarus.org/martin/PorterStemmer/def.txt
 
-import std/[strutils, sequtils]
+import std/[strutils, sequtils, unicode]
 
 type
   PorterStemmer* = object
@@ -133,24 +133,29 @@ proc step1b(s: string): string =
       elif measure(result) == 1 and cvc(result):
         result.add("e")
 
-proc step1c(s: string): string =
+proc step1c*(s: string): string =
   result = s
   if result.endsWith("y") and hasVowel(result[0..^2]):
     result = result[0..^2] & "i"
 
-proc step2(s: string): string =
+proc step1ab*(s: string): string =
+  ## Reference steps 1a + 1b combined: plural/suffix strip, then
+  ## -eed/-ed/-ing handling with at/bl/iz + double-consonant cleanup.
+  step1b(step1a(s))
+
+proc step2*(s: string): string =
   result = s
   if result.len < 3: return
   if measure(result[0..^2]) == 0: return
   result = applySuffixRules(result, porterStep2Rules)
 
-proc step3(s: string): string =
+proc step3*(s: string): string =
   result = s
   if result.len < 3: return
   if measure(result[0..^2]) == 0: return
   result = applySuffixRules(result, porterStep3Rules)
 
-proc step4(s: string): string =
+proc step4*(s: string): string =
   result = s
   if result.len < 3: return
   if measure(result[0..^2]) < 2: return
@@ -168,6 +173,11 @@ proc step5b(s: string): string =
   if measure(result) > 1 and endsDoubleConsonant(result) and result[^1] == 'l':
     result = result[0..^2]
 
+proc step5ab*(s: string): string =
+  ## Reference steps 5a + 5b combined: final -e strip, then
+  ## double-consonant -l cleanup.
+  step5b(step5a(s))
+
 # ============================================================
 # Public API
 # ============================================================
@@ -176,16 +186,14 @@ proc stem*(ps: PorterStemmer, word: string): string =
   ## Stem a single English word using the Porter algorithm.
   ## Returns the word as-is for empty strings or words <= 2 characters.
   if word.len == 0: return ""
-  if word.len <= 2: return word.toLowerAscii()
-  result = word.toLowerAscii()
-  result = step1a(result)
-  result = step1b(result)
+  if word.len <= 2: return word.toLower()
+  result = word.toLower()
+  result = step1ab(result)
   result = step1c(result)
   result = step2(result)
   result = step3(result)
   result = step4(result)
-  result = step5a(result)
-  result = step5b(result)
+  result = step5ab(result)
 
 proc stemWord*(word: string): string =
   ## Quick stem a single word.

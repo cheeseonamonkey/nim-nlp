@@ -9,11 +9,14 @@ It is implemented in pure Nim and targets Nim 2.x.
 ## Features
 
 - Word, whitespace, sentence, simple-pattern, and Unicode character n-gram tokenizers
-- Lowercasing, accent stripping, whitespace, punctuation, number, HTML, URL, and email normalization
+- Word n-grams as token arrays (`ngrams`, `bigrams`, `trigrams`, `ngramRange`)
+- Lowercasing, accent stripping, whitespace, punctuation, number, HTML, URL, email, and English contraction-expansion normalization
+- Rune-aware edit distance and fuzzy similarity (Levenshtein, Jaro, Jaro-Winkler, n-gram distance)
 - English, Spanish, French, and German stopwords
 - Porter and irregular-form-aware smart stemming
-- Term/document frequencies, statistics, keywords, and similarity measures
+- Term/document frequencies, statistics, keywords, and similarity measures (word-bag and order-sensitive n-gram cosine/Jaccard)
 - Bag-of-words / CountVectorizer with cosine search
+- Stateless HashingVectorizer (feature hashing) with cosine similarity
 - TF-IDF vectorization and cosine search
 - BM25 retrieval with configurable `k1` and `b`
 - LDA topic modeling (collapsed Gibbs) with perplexity and coherence (UMass / c_v)
@@ -67,6 +70,15 @@ let cleaned = "Hi <b>Bob</b>, see https://example.com or bob@example.com".normal
   .normalizeReplaceEmails()
 # "Hi Bob, see <url> or <email>"
 
+let expanded = "I don't think it's ready".normalizeExpandContractions()
+# "I do not think it is ready"
+
+var pipe = TextPipeline()
+pipe.addStep(Lowercaser())
+pipe.addStep(ContractionExpander())
+let piped = pipe.normalize("I DON'T know")
+# "i do not know"
+
 let bow = fitCounts(documents)
 let bowResults = bow.searchCounts(wordTokenize("cat mat"))
 
@@ -88,6 +100,19 @@ let similarity = cosineSimilarityBags(
   wordTokenize("quick brown fox"),
   wordTokenize("quick red fox")
 )
+
+let grams = bigrams(wordTokenize("the quick brown fox"))
+# @[@["the", "quick"], @["quick", "brown"], @["brown", "fox"]]
+let gramFreqs = ngramFrequencies(wordTokenize("one fish two fish one fish"), 2)
+let topGrams = topNgrams(wordTokenize("one fish two fish one fish"), 2, topK = 3)
+let shingleSim = ngramCosineSimilarity(  # order-sensitive: 0.0 here, bag cosine is 1.0
+  wordTokenize("dog bites man"),
+  wordTokenize("man bites dog"), 2)
+
+let dist = levenshtein("kitten", "sitting")        # 3
+let fuzzy = jaroWinkler("martha", "marhta")         # ~0.961
+let hashed = transformHashing(wordTokenize("cat mat")) # hashed SparseVector
+let wins = windows(@[1, 2, 3, 4], 2)                 # @[@[1, 2], @[2, 3], @[3, 4]]
 ```
 
 ## Public API
@@ -97,12 +122,28 @@ parameters are omitted here; see the module doc comments for full signatures.
 
 **`tokenize`**
 - `wordTokenize`, `whitespaceTokenize`, `ngramTokenize`, `splitSentences` — convenience tokenizers for words, whitespace, character n-grams, and sentences.
-- `ngrams` — word-level n-grams built from an existing token sequence.
 - `WordTokenizer`, `WhitespaceTokenizer`, `PatternTokenizer`, `NGramTokenizer`, `SentenceTokenizer`, `Tokenizer` — configurable tokenizer types, each with `tokenize`.
+- `flushToken`, `isSentenceBoundary` — the shared token-drain and boundary-test helpers the tokenizers derive from.
+
+**`ngrams`**
+- `ngrams`, `bigrams`, `trigrams`, `ngramRange` — word-level n-grams returned as arrays of component tokens (`seq[seq[string]]`).
+- `windows` — the generic sliding-window base everything above derives from; `joinGrams` — escape hatch back to joined-string form.
+
+**`distance`**
+- `levenshtein`, `levenshteinSimilarity` — rune-aware edit distance and its normalized similarity.
+- `jaro`, `jaroWinkler` — Jaro and Jaro-Winkler fuzzy similarity (configurable `prefixWeight` and `maxPrefix`).
+- `levenshteinRunes`, `jaroRunes` — the rune-level bases the string versions delegate to (decode once, reuse).
+- `ngramDistance` — case-sensitive character-n-gram Jaccard distance.
+
+**`hashing`**
+- `HashingVectorizer` / `newHashingVectorizer` — stateless feature-hashing vectorizer (`dim`, `signed`); hashed ids are stable within a process but not guaranteed across Nim versions, so re-hash corpus and queries together.
+- `transform`, `transformHashing` — hash token sequences into `SparseVector`s; compare with `cosineSimilarity`.
+- `hashBucket`, `hashSign` — the exposed bucket/sign primitives (building blocks for MinHash/LSH-style sketches).
 
 **`normalizers`**
 - `normalizeLowercase`, `normalizeStripAccents`, `normalizeWhitespace`, `normalizeStripPunctuation`, `normalizeRemoveNumbers`, `normalizeStripHtml`, `normalizeReplaceUrls`, `normalizeReplaceEmails` — one-call text normalizers.
-- `Lowercaser`, `AccentStripper`, `WhitespaceNormalizer`, `PunctuationStripper`, `NumberNormalizer`, `HtmlStripper`, `UrlReplacer`, `EmailReplacer`, `CustomNormalizer` — normalizer types, each with a `normalize` overload.
+- `Lowercaser`, `AccentStripper`, `WhitespaceNormalizer`, `PunctuationStripper`, `NumberNormalizer`, `HtmlStripper`, `UrlReplacer`, `EmailReplacer`, `CustomNormalizer`, `ContractionExpander` — normalizer types, each with a `normalize` overload (`normalizeExpandContractions` is the contraction convenience; possessives and `o'clock` are left untouched).
+- `Normalizer`, `TextPipeline`, `addStep` — the `Normalizer` concept every type above satisfies, plus a composable, nestable pipeline (`normalize` on a pipeline runs its steps in order).
 - `chain` — compose two normalizer procs into one.
 
 **`stopwords`**
@@ -110,12 +151,16 @@ parameters are omitted here; see the module doc comments for full signatures.
 - `englishStopWords`, `spanishStopWords`, `frenchStopWords`, `germanStopWords` — built-in sets.
 
 **`porter_stemmer` / `smart_stemmer`**
-- `stemWord`, `stemTokens` — Porter stemming.
+- `stemWord`, `stemTokens` — Porter stemming; `step1ab`, `step1c`, `step2`, `step3`, `step4`, `step5ab` — the reference-algorithm step groupings `stem` derives from.
 - `SmartStemmer`, `stem`, `smartStemWord`, `smartStemTokens` — irregular-form-aware stemming; `irregularPlurals`, `irregularVerbs`, and `noChangeWords` expose the lookup data.
+- `lookupIrregular`, `detectPlural`, `smartStepEdIng`, `smartStepY`, `smartStep3/4/5`, `smartStepFinalE`, `smartStepDoubleL` — the smart pipeline stages.
 
 **`analysis`**
 - `termFrequencies`, `documentFrequency`, `idfSmoothed`, `sortedTermsByFrequency` — frequency helpers.
 - `jaccardSimilarity`, `cosineSimilarityBags`, `overlapCoefficient` — similarity measures.
+- `ngramFrequencies`, `topNgrams` — n-gram counting and ranking (frequency descending, deterministic tie-break).
+- `ngramCosineSimilarity`, `ngramJaccardSimilarity` — order-sensitive shingle similarity over word n-grams.
+- `countItems`, `cosineCounts`, `jaccardSets`, `overlapSets` — the generic counting/similarity bases every measure above derives from.
 - `textStats` / `TextStats` — token, unique-term, hapax, and average-length statistics.
 - `uniqueTerms`, `extractKeywords` — corpus vocabulary and keyword extraction.
 
@@ -131,6 +176,7 @@ parameters are omitted here; see the module doc comments for full signatures.
 - `docTopicDistribution`, `topicWordDistribution` — per-document and per-topic distributions.
 - `topTerms`, `topTermsByPMI` — topic labeling by phi or by PMI reranking.
 - `perplexity`, `coherenceUMass`, `coherenceCV` — model evaluation.
+- `sortedPairKey`, `meanPmiScores`, `meanPairwisePmi`, `normalizeUnit`, `umassPairScore` — the coherence building blocks.
 
 **`types`**
 - `SparseVector` / `newSparseVector` — index-to-value vectors with `set`, `get`, `containsIdx`, `clear`, `len`, `pairs`, `values`, and `cosineSimilarity`.
@@ -140,7 +186,7 @@ parameters are omitted here; see the module doc comments for full signatures.
 ## Linguistic data
 
 The built-in linguistic data (stopword lists, irregular plurals, irregular
-verbs, and no-change words) is compiled into the library as constants in
+verbs, no-change words, and the English contraction table) is compiled into the library as constants in
 `src/nlp/private/lexicon.nim`. That file is the editable source of truth: change
 it and rebuild to change the built-in lists.
 

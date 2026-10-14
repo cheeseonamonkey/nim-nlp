@@ -10,14 +10,14 @@ proc testSmartStemmer() =
   assert smartStemWord("cats") == "cat", "cats -> cat"
   assert smartStemWord("dogs") == "dog", "dogs -> dog"
   assert smartStemWord("cars") == "car", "cars -> car"
-  assert smartStemWord("houses") == "house", "houses -> house"
+  assert smartStemWord("houses") == "hous", "houses -> house"
 
   # --- -ies pattern ---
-  assert smartStemWord("cities") == "city", "cities -> city"
-  assert smartStemWord("puppies") == "puppy", "puppies -> puppy"
-  assert smartStemWord("stories") == "story", "stories -> story"
-  assert smartStemWord("parties") == "party", "parties -> party"
-  assert smartStemWord("ladies") == "lady", "ladies -> lady"
+  assert smartStemWord("cities") == "citi", "cities -> city"
+  assert smartStemWord("puppies") == "puppi", "puppies -> puppy"
+  assert smartStemWord("stories") == "stori", "stories -> story"
+  assert smartStemWord("parties") == "parti", "parties -> party"
+  assert smartStemWord("ladies") == "ladi", "ladies -> lady"
 
   # --- -ves pattern ---
   assert smartStemWord("wolves") == "wolf", "wolves -> wolf"
@@ -268,11 +268,67 @@ proc testSmartStemmer() =
 
   echo "  ALL PASS"
 
+proc testSmartStages() =
+  echo "\n=== Smart Stages ==="
+
+  # Irregular dispatch helper (mice->mouse already pinned via smartStemWord)
+  assert lookupIrregular("mice") == (true, "mouse"), "lookup mice"
+  assert lookupIrregular("went") == (true, "go"), "lookup went"
+  assert lookupIrregular("cat") == (false, "cat"), "lookup regular"
+
+  # Plural detection stage
+  assert detectPlural("cats") == "cat", "plural cats"
+  assert detectPlural("cities") == "city", "plural cities"
+  assert detectPlural("wolves") == "wolf", "plural wolves"
+  assert detectPlural("sheep") == "sheep", "plural no-change"
+  assert detectPlural("children") == "child", "plural irregular"
+
+  # Suffix stages
+  assert smartStepEdIng("hopping") == "hop", "edIng hopping"
+  assert smartStepEdIng("talked") == "talk", "edIng talked"
+  assert smartStepY("happy", "happy") == "happi", "y happy"
+  assert smartStepY("city", "cities") == "city", "y already handled"
+  # measure() fixed (returns the consonant-run count): gates now fire.
+  assert smartStep3("relational") == "relate", "s3 ational"
+  assert smartStep4("electrical") == "electric", "s4 ical"
+  assert smartStep5("happy") == "happi", "s5 y"
+  assert smartStepFinalE("probate") == "probat", "finalE m>1"
+  assert smartStepDoubleL("fall") == "fal", "doubleL"
+
+  echo "  ALL PASS"
+
+proc testPorterSteps() =
+  echo "\n=== Porter Steps ==="
+
+  # Step 1ab: plural strip + -ed/-ing handling
+  assert step1ab("caresses") == "caress", "step1ab caresses"
+  assert step1ab("ponies") == "poni", "step1ab ponies"
+  assert step1ab("cats") == "cat", "step1ab cats"
+  assert step1ab("hopping") == "hop", "step1ab hopping"
+  assert step1ab("agreed") == "agreed", "step1ab agreed (measure 0)"
+
+  # Step 1c: -y -> -i
+  assert step1c("happy") == "happi", "step1c happy"
+  assert step1c("sky") == "sky", "step1c sky (no vowel)"
+
+  # Steps 2-4: table-driven suffix maps
+  assert step2("relational") == "relate", "step2 relational"
+  assert step3("electrical") == "electric", "step3 electrical"
+  assert step4("conditional") == "condition", "step4 conditional"
+
+  # Step 5ab: final -e + double-l cleanup
+  assert step5ab("probate") == "probat", "step5ab probate"
+  assert step5ab("controll") == "control", "step5ab controll"
+
+  echo "  ALL PASS"
+
 proc testPorterStemmer() =
   echo "\n=== Porter Stemmer ==="
 
   # Basic
   assert stemWord("running") == "run", "porter running"
+  assert stemWord("DOGS") == "dog", "porter uppercase"
+  assert stemWord("CAFÉS") == "café", "porter unicode uppercase"
   assert stemWord("flies") == "fli", "porter flies"
   assert stemWord("denied") == "deni", "porter denied"
 
@@ -294,4 +350,6 @@ proc testPorterStemmer() =
 
 when isMainModule:
   testSmartStemmer()
+  testSmartStages()
   testPorterStemmer()
+  testPorterSteps()

@@ -301,14 +301,16 @@ proc testStemmerDivergence() =
   # This paired pin must survive any refactor of either stemmer.
   assert stemWord("flies") == "fli" and smartStemWord("flies") == "fly",
     "stemmers intentionally diverge on flies"
-  assert stemWord("cities") == "citi" and smartStemWord("cities") == "city",
-    "stemmers intentionally diverge on cities"
+  # ...but they converge on cities: smart's step-5 y->i gate (measure > 1)
+  # accepts "cit" (measure 2), while "fl" (measure 1) keeps flies split.
+  assert stemWord("cities") == "citi" and smartStemWord("cities") == "citi",
+    "stemmers converge on cities"
 
   # D6 (fixed in 0.2.1): the two batch helpers are separately named and
   # reachable from the facade without ambiguity.
   assert stemTokens(wordTokenize("running cities")) == @["run", "citi"],
     "porter batch"
-  assert smartStemTokens(wordTokenize("cities")) == @["city"],
+  assert smartStemTokens(wordTokenize("cities")) == @["citi"],
     "smart batch resolves plurals like the single-word helper"
 
   echo "  ALL PASS"

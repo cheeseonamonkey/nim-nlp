@@ -4,8 +4,8 @@
 ## compile-time constants in ``private/lexicon``; nothing is read from disk at
 ## install, compile, or run time.
 
-import std/[tables, strutils, sequtils, sets]
-import ./private/lexicon
+import std/[tables, strutils, sequtils, sets, unicode]
+import private/lexicon
 
 let
   ## Irregular plural forms and their singular equivalents.
@@ -33,6 +33,7 @@ proc measure(s: string): int =
       if not consonantRun:
         inc count
         consonantRun = true
+  result = count
 
 proc hasVowel(s: string): bool =
   for ch in s:
@@ -118,7 +119,7 @@ const
 # Smart plural detection
 # ============================================================
 
-proc detectPlural(w: string): string =
+proc detectPlural*(w: string): string =
   ## Detect and singularize plural forms.
   ## Returns the singular form, or the input unchanged.
   # Check irregular forms first
@@ -182,33 +183,22 @@ type
   SmartStemmer* = object
     ## A smart English stemmer combining pattern rules with irregular form lookup.
 
-proc stem*(s: SmartStemmer, word: string): string =
-  ## Stem a single English word using smart pattern rules + Porter-style suffix stripping.
-  ## Handles irregular plurals, irregular verbs, and regular suffixes.
-  if word.len <= 2: return word.toLowerAscii()
+# ============================================================
+# Smart pipeline stages
+# ============================================================
 
-  let w = word.toLowerAscii()
-
-  # Check irregular forms first
+proc lookupIrregular*(w: string): tuple[found: bool, stem: string] =
+  ## Irregular-form dispatch: plural table first, then verb table.
+  ## Returns ``(false, w)`` when ``w`` is regular.
   if irregularPlurals.hasKey(w):
-    return irregularPlurals[w]
+    return (true, irregularPlurals[w])
   if irregularVerbs.hasKey(w):
-    return irregularVerbs[w]
+    return (true, irregularVerbs[w])
+  (false, w)
 
-  # Words that don't change
-  if w in noChangeWords:
-    return w
-
-  # Handle plurals first
-  result = detectPlural(w)
-
-  # Track if original word ended in 'y' (for step 2)
-  let originalEndedInY = w.endsWith("y")
-  # Track if we already handled -y via plural detection (e.g., cities → city)
-  let alreadyHandledY = w.endsWith("ies") and result.endsWith("y")
-
-  # Apply Porter-style suffix stripping
-  # Step 1: Handle -eed, -ed, -ing
+proc smartStepEdIng*(s: string): string =
+  ## Step 1: -eed/-ed/-ing handling with at/bl/iz + double-consonant cleanup.
+  result = s
   if result.endsWith("eed"):
     let stem = result[0..^4]
     if measure(stem) > 0: result = stem & "ee"
@@ -219,28 +209,68 @@ proc stem*(s: SmartStemmer, word: string): string =
     let stem = result[0..^4]
     if hasVowel(stem): result = applyEdIngStem(stem)
 
-  # Step 2: Handle -y (skip if already handled by plural detection)
-  if not alreadyHandledY and originalEndedInY and result.endsWith("y") and hasVowel(result[0..^2]):
-    result = result[0..^2] & "i"
+proc smartStepY*(s, original: string): string =
+  ## Step 2: -y -> -i.  Needs the pre-strip ``original`` to detect words
+  ## already singularized by plural handling (e.g. cities -> city).
+  let alreadyHandledY = original.endsWith("ies") and s.endsWith("y")
+  if not alreadyHandledY and original.endsWith("y") and s.endsWith("y") and
+     hasVowel(s[0..^2]):
+    return s[0..^2] & "i"
+  s
 
-  # Step 3: Handle -ational, -tional, etc.
-  result = applySuffixRules(result, smartStep3Rules)
+proc smartStep3*(s: string): string =
+  ## Step 3: -ational, -tional, etc.
+  applySuffixRules(s, smartStep3Rules)
 
-  # Step 4: Handle -icate, -ative, etc.
-  result = applySuffixRules(result, smartStep4Rules)
+proc smartStep4*(s: string): string =
+  ## Step 4: -icate, -ative, etc.
+  applySuffixRules(s, smartStep4Rules)
 
-  # Step 5: Handle -ement, -ment, etc.
-  result = applySuffixRules(result, smartStep5Rules)
+proc smartStep5*(s: string): string =
+  ## Step 5: -ement, -ment, etc. (incl. the strict -y -> -i rule).
+  applySuffixRules(s, smartStep5Rules)
 
-  # Step 6: Handle final -e
+proc smartStepFinalE*(s: string): string =
+  ## Step 6: final -e strip.
+  result = s
   if result.endsWith("e"):
     let stem = result[0..^2]
     if measure(stem) > 1: result = stem
     elif measure(stem) == 1 and not cvc(stem): result = stem
 
-  # Step 7: Handle final double consonant
+proc smartStepDoubleL*(s: string): string =
+  ## Step 7: final double-consonant -l cleanup.
+  result = s
   if measure(result) > 1 and endsDoubleConsonant(result) and result[^1] == 'l':
     result = result[0..^2]
+
+proc stem*(s: SmartStemmer, word: string): string =
+  ## Stem a single English word using smart pattern rules + Porter-style suffix stripping.
+  ## Handles irregular plurals, irregular verbs, and regular suffixes.
+  if word.len <= 2: return word.toLower()
+
+  let w = word.toLower()
+
+  # Check irregular forms first
+  let irr = lookupIrregular(w)
+  if irr.found:
+    return irr.stem
+
+  # Words that don't change
+  if w in noChangeWords:
+    return w
+
+  # Handle plurals first
+  result = detectPlural(w)
+
+  # Porter-style suffix stripping, one named stage per step
+  result = smartStepEdIng(result)
+  result = smartStepY(result, w)
+  result = smartStep3(result)
+  result = smartStep4(result)
+  result = smartStep5(result)
+  result = smartStepFinalE(result)
+  result = smartStepDoubleL(result)
 
 # ============================================================
 # Convenience

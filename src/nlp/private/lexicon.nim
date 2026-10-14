@@ -8,6 +8,11 @@
 ##
 ## Values are stored lowercased, matching the old loaders' ``toLowerAscii``
 ## normalization.  Rows are kept verbatim and in file order.
+##
+## ``builtinContractions`` maps lowercase contraction forms (ASCII apostrophe)
+## to their lowercase expansions.  Only full-token forms are listed; bare
+## suffixes such as "'re" or "n't" are deliberately absent so possessives
+## ("dog's") and words like "o'clock" (not listed) never match.
 
 
 const builtinEnglishStopwords* = @[
@@ -1311,4 +1316,115 @@ const builtinNoChangeWords* = @[
   "bowls",
   "dominoes",
   "quoits"
+]
+
+## English contractions: (contracted form, expansion).  Keys are lowercase
+## with an ASCII apostrophe; the normalizer lowercases input tokens and
+## folds U+2019 to `'` before lookup.  Expansions are lowercase.
+##
+## Choices: `'s` always expands to "is" ("it's been" is read as "it is
+## been"; the is/has ambiguity is resolved in favour of "is"), `'d`
+## always expands to "would" (not "had"), and `'s` forms exist only for
+## lexicalized pronouns — possessives such as "dog's" have no entry and
+## "o'clock" is intentionally absent so both pass through untouched.
+const builtinContractions* = @[
+  ("ain't", "is not"),
+  ("aren't", "are not"),
+  ("can't", "cannot"),
+  ("couldn't", "could not"),
+  ("daren't", "dare not"),
+  ("didn't", "did not"),
+  ("doesn't", "does not"),
+  ("don't", "do not"),
+  ("hadn't", "had not"),
+  ("hasn't", "has not"),
+  ("haven't", "have not"),
+  ("isn't", "is not"),
+  ("mightn't", "might not"),
+  ("mustn't", "must not"),
+  ("needn't", "need not"),
+  ("oughtn't", "ought not"),
+  ("shan't", "shall not"),
+  ("wasn't", "was not"),
+  ("weren't", "were not"),
+  ("won't", "will not"),
+  ("wouldn't", "would not"),
+  ("shouldn't", "should not"),
+  ("you're", "you are"),
+  ("we're", "we are"),
+  ("they're", "they are"),
+  ("how're", "how are"),
+  ("what're", "what are"),
+  ("where're", "where are"),
+  ("who're", "who are"),
+  ("when're", "when are"),
+  ("why're", "why are"),
+  ("there're", "there are"),
+  ("i've", "i have"),
+  ("we've", "we have"),
+  ("they've", "they have"),
+  ("you've", "you have"),
+  ("could've", "could have"),
+  ("should've", "should have"),
+  ("would've", "would have"),
+  ("must've", "must have"),
+  ("might've", "might have"),
+  ("who've", "who have"),
+  ("what've", "what have"),
+  ("where've", "where have"),
+  ("when've", "when have"),
+  ("why've", "why have"),
+  ("how've", "how have"),
+  ("i'll", "i will"),
+  ("you'll", "you will"),
+  ("he'll", "he will"),
+  ("she'll", "she will"),
+  ("it'll", "it will"),
+  ("we'll", "we will"),
+  ("they'll", "they will"),
+  ("that'll", "that will"),
+  ("there'll", "there will"),
+  ("what'll", "what will"),
+  ("who'll", "who will"),
+  ("where'll", "where will"),
+  ("when'll", "when will"),
+  ("why'll", "why will"),
+  ("how'll", "how will"),
+  ("i'd", "i would"),
+  ("you'd", "you would"),
+  ("he'd", "he would"),
+  ("she'd", "she would"),
+  ("it'd", "it would"),
+  ("we'd", "we would"),
+  ("they'd", "they would"),
+  ("that'd", "that would"),
+  ("there'd", "there would"),
+  ("what'd", "what would"),
+  ("who'd", "who would"),
+  ("where'd", "where would"),
+  ("when'd", "when would"),
+  ("why'd", "why would"),
+  ("how'd", "how would"),
+  ("i'm", "i am"),
+  ("ma'am", "madam"),
+  ("it's", "it is"),
+  ("what's", "what is"),
+  ("who's", "who is"),
+  ("that's", "that is"),
+  ("there's", "there is"),
+  ("where's", "where is"),
+  ("when's", "when is"),
+  ("why's", "why is"),
+  ("how's", "how is"),
+  ("here's", "here is"),
+  ("he's", "he is"),
+  ("she's", "she is"),
+  ("let's", "let us"),
+  ("y'all", "you all"),
+  ("'tis", "it is"),
+  ("'twas", "it was"),
+  ("'em", "them"),
+  ("'til", "until"),
+  ("'cause", "because"),
+  ("'round", "around")
 ]

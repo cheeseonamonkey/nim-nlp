@@ -1,6 +1,9 @@
 ## nlp — A natural language processing toolkit for Nim.
 
 import nlp/tokenize
+import nlp/ngrams
+import nlp/distance
+import nlp/hashing
 import nlp/normalizers
 import nlp/stopwords
 import nlp/smart_stemmer
@@ -13,6 +16,9 @@ import nlp/coherence
 import nlp/types
 
 export tokenize
+export ngrams
+export distance
+export hashing
 export normalizers
 export stopwords
 export smart_stemmer

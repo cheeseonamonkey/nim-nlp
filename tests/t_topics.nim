@@ -51,5 +51,55 @@ proc testTopics() =
 
   echo "  ALL PASS"
 
+proc testCoherenceHelpers() =
+  echo "\n=== Coherence helpers ==="
+
+  # sortedPairKey canonicalizes unordered pairs for every lookup table.
+  assert sortedPairKey("b", "a") == ("a", "b"), "pair key sorts"
+  assert sortedPairKey("a", "b") == ("a", "b"), "pair key keeps order"
+  assert sortedPairKey("x", "x") == ("x", "x"), "pair key self-pair"
+
+  # normalizeUnit maps to [0, 1]; a constant input stays neutral at 0.5.
+  assert normalizeUnit(@[2.0, 4.0, 6.0]) == @[0.0, 0.5, 1.0],
+    "normalizeUnit min-max"
+  assert normalizeUnit(@[3.0, 3.0]) == @[0.5, 0.5],
+    "normalizeUnit constant input"
+  assert normalizeUnit(newSeq[float](0)) == newSeq[float](0),
+    "normalizeUnit empty"
+
+  # meanPairwisePmi agrees with hand-scored PMI on a tiny corpus.
+  # Corpus: [a b] [a b c] [c] -> df = {a:2,b:2,c:2},
+  # pairs = {(a,b):2,(a,c):1,(b,c):1}, D = 3.
+  var df = initTable[string, int]()
+  df["a"] = 2
+  df["b"] = 2
+  df["c"] = 2
+  var pr = initTable[(string, string), int]()
+  pr[("a", "b")] = 2
+  pr[("a", "c")] = 1
+  pr[("b", "c")] = 1
+  const D = 3
+  let mean = meanPairwisePmi(@["a", "b", "c"], df, pr, D)
+  let expectMean = (ln(1.5) + 2.0 * ln(0.75)) / 3.0
+  assert abs(mean - expectMean) < 1e-12, "meanPairwisePmi averages pairs"
+  assert meanPairwisePmi(@["solo"], df, pr, D) == 0.0,
+    "meanPairwisePmi needs a pair"
+
+  # meanPmiScores matches direct pairwise scoring per candidate.
+  let per = meanPmiScores(@["a", "b", "c"], df, pr, D)
+  assert per.len == 3, "meanPmiScores length"
+  let expectA = (ln(1.5) + ln(0.75)) / 2.0
+  assert abs(per[0] - expectA) < 1e-12, "meanPmiScores candidate average"
+
+  # umassPairScore is the log co-occurrence ratio: co=2, dj=2 -> ln(1).
+  assert abs(umassPairScore("a", "b", df, pr)) < 1e-12,
+    "umassPairScore value"
+  assert abs(umassPairScore("b", "a", df, pr) -
+    umassPairScore("a", "b", df, pr)) < 1e-12,
+    "umassPairScore is order-insensitive"
+
+  echo "  ALL PASS"
+
 when isMainModule:
   testTopics()
+  testCoherenceHelpers()

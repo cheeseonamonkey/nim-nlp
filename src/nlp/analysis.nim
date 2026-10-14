@@ -7,8 +7,50 @@
 ## - Text statistics
 ## - Keyword extraction
 
-import std/[tables, math, algorithm, sets, sequtils, strutils]
+import std/[tables, math, algorithm, sets, sequtils, strutils, unicode]
 import private/model_utils
+import ngrams
+
+# ============================================================
+# Generic base primitives
+# ============================================================
+
+proc countItems*[K](items: openArray[K]): Table[K, int] =
+  ## Generic counter: count occurrences of each item.
+  ## Empty input -> empty table.
+  for x in items:
+    result[x] = result.getOrDefault(x, 0) + 1
+
+proc cosineCounts*[K](fa, fb: Table[K, int]): float =
+  ## Cosine similarity over integer count tables.
+  ## Returns 0.0 if either table is empty (zero norm).
+  ## (Float-vector sibling: `cosineSimilarity` on SparseVector in `types`.)
+  var dotProduct = 0.0
+  var normA = 0.0
+  var normB = 0.0
+  for key, freq in fa:
+    normA += freq.float * freq.float
+    if fb.hasKey(key):
+      dotProduct += freq.float * fb[key].float
+  for _, freq in fb:
+    normB += freq.float * freq.float
+  if normA == 0.0 or normB == 0.0: 0.0
+  else: dotProduct / (sqrt(normA) * sqrt(normB))
+
+proc jaccardSets*[T](a, b: HashSet[T]): float =
+  ## Jaccard similarity over sets: |A n B| / |A u B|.
+  ## Returns 0.0 if the union is empty.
+  let intersection = a * b
+  let union = a + b
+  if union.len == 0: 0.0
+  else: intersection.len.float / union.len.float
+
+proc overlapSets*[T](a, b: HashSet[T]): float =
+  ## Overlap coefficient over sets: |A n B| / min(|A|, |B|).
+  ## Returns 0.0 if the smaller set is empty.
+  let minSize = min(a.len, b.len)
+  if minSize == 0: 0.0
+  else: (a * b).len.float / minSize.float
 
 # ============================================================
 # Frequency analysis
@@ -16,8 +58,7 @@ import private/model_utils
 
 proc termFrequencies*(tokens: seq[string]): Table[string, int] =
   ## Count term frequencies in a token sequence.
-  for tok in tokens:
-    result[tok] = result.getOrDefault(tok, 0) + 1
+  countItems(tokens)
 
 proc documentFrequency*(documents: seq[seq[string]]): Table[string, int] =
   ## Count how many documents contain each term.
@@ -47,42 +88,17 @@ proc sortedTermsByFrequency*(freqs: Table[string, int]): seq[(string, int)] =
 proc jaccardSimilarity*(a, b: seq[string]): float =
   ## Jaccard similarity between two token sequences.
   ## Returns 0.0 for empty inputs.
-  if a.len == 0 or b.len == 0: return 0.0
-  let setA = a.toHashSet()
-  let setB = b.toHashSet()
-  let intersection = setA * setB
-  let union = setA + setB
-  if union.len == 0: 0.0
-  else: intersection.len.float / union.len.float
+  jaccardSets(a.toHashSet(), b.toHashSet())
 
 proc cosineSimilarityBags*(a, b: seq[string]): float =
   ## Cosine similarity between two token sequences (as bags of words).
   ## Returns 0.0 for empty inputs.
-  if a.len == 0 or b.len == 0: return 0.0
-  let freqA = termFrequencies(a)
-  let freqB = termFrequencies(b)
-  var dotProduct = 0.0
-  var normA = 0.0
-  var normB = 0.0
-  for term, freq in freqA:
-    normA += freq.float * freq.float
-    if freqB.hasKey(term):
-      dotProduct += freq.float * freqB[term].float
-  for _, freq in freqB:
-    normB += freq.float * freq.float
-  if normA == 0.0 or normB == 0.0: 0.0
-  else: dotProduct / (sqrt(normA) * sqrt(normB))
+  cosineCounts(termFrequencies(a), termFrequencies(b))
 
 proc overlapCoefficient*(a, b: seq[string]): float =
   ## Overlap coefficient: |A ∩ B| / min(|A|, |B|).
   ## Returns 0.0 for empty inputs.
-  if a.len == 0 or b.len == 0: return 0.0
-  let setA = a.toHashSet()
-  let setB = b.toHashSet()
-  let intersection = setA * setB
-  let minSize = min(setA.len, setB.len)
-  if minSize == 0: 0.0
-  else: intersection.len.float / minSize.float
+  overlapSets(a.toHashSet(), b.toHashSet())
 
 # ============================================================
 # Text statistics
@@ -142,7 +158,7 @@ proc extractKeywords*(
   if documents.len == 0 or topN <= 0:
     return newSeq[(string, float)]()
   var scores: Table[string, float]
-  case methodName.toLowerAscii():
+  case methodName.toLower():
   of "tfidf":
     let df = documentFrequency(documents)
     scores = initTable[string, float]()
@@ -165,3 +181,40 @@ proc extractKeywords*(
   for term, score in scores:
     pairs.add((term, score))
   result = topScored(pairs, topN)
+
+# ============================================================
+# N-gram analysis
+# ============================================================
+
+proc ngramFrequencies*(tokens: seq[string], n: int): Table[seq[string], int] =
+  ## Count n-gram frequencies in a token sequence.
+  ## Keys are token arrays, preserving token boundaries.
+  ## Returns an empty table when n <= 0 or `tokens.len < n`.
+  countItems(ngrams(tokens, n))
+
+proc topNgrams*(
+  tokens: seq[string], n: int, topK = 10
+): seq[(seq[string], int)] =
+  ## Top-K most frequent n-grams, frequency descending.
+  ## Ties break by the joined form ascending ("\x1F" separator,
+  ## comparison only) for determinism.
+  ## Returns @[] when topK <= 0 or there are no n-grams.
+  if topK <= 0: return @[]
+  let freqs = ngramFrequencies(tokens, n)
+  var pairs = newSeq[(seq[string], int)]()
+  for gram, freq in freqs:
+    pairs.add((gram, freq))
+  result = topRanked(pairs, topK,
+    proc(a, b: seq[string]): int = cmp(a.join("\x1F"), b.join("\x1F")))
+
+proc ngramCosineSimilarity*(a, b: seq[string], n: int): float =
+  ## Cosine similarity between two token sequences as bags of n-grams.
+  ## Order-sensitive: unlike `cosineSimilarityBags`, shingles capture
+  ## word order. Returns 0.0 for empty inputs or when either side
+  ## yields no n-grams.
+  cosineCounts(ngramFrequencies(a, n), ngramFrequencies(b, n))
+
+proc ngramJaccardSimilarity*(a, b: seq[string], n: int): float =
+  ## Jaccard similarity between the n-gram sets of two token sequences.
+  ## Returns 0.0 for empty inputs or when either side yields no n-grams.
+  jaccardSets(ngrams(a, n).toHashSet(), ngrams(b, n).toHashSet())

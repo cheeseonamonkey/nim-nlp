@@ -22,6 +22,9 @@ proc testStopwords() =
   assert isStopWord("hello", "english") == false, "isStopWord negative"
   assert isStopWord("", "english") == false, "isStopWord empty"
   assert isStopWord("THE", "english") == true, "isStopWord uppercase"
+  assert isStopWord("À", "french") == true, "isStopWord unicode uppercase"
+  assert removeStopWords(@["À", "chat"], "french") == @["chat"],
+    "removeStopWords unicode case"
 
   # Unknown language
   assert isStopWord("the", "klingon") == false, "isStopWord unknown lang"

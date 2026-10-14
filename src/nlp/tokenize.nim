@@ -3,6 +3,7 @@
 ## Provides the `Tokenizer` concept and built-in implementations.
 
 import std/[unicode, strutils, sets]
+import ngrams
 
 type
   Tokenizer* = concept x
@@ -44,6 +45,14 @@ type
 # Implementations
 # ============================================================
 
+proc flushToken*(current: string, lowercase: bool, minLength: int,
+                 result: var seq[string]) =
+  ## Append one accumulated token run, honoring `lowercase`/`minLength`.
+  ## Shared drain step for the character-scanning tokenizers.
+  if current.len == 0: return
+  let tok = if lowercase: current.toLower() else: current
+  if tok.len >= minLength: result.add(tok)
+
 template accumulateTokens(t: object, text: string, matches: untyped) =
   ## Shared character-accumulation skeleton for tokenizers that scan a
   ## string character by character. `matches` is evaluated with `ch` bound
@@ -54,13 +63,9 @@ template accumulateTokens(t: object, text: string, matches: untyped) =
       if matches:
         current.add(ch)
       else:
-        if current.len > 0:
-          let tok = if t.lowercase: current.toLowerAscii() else: current
-          if tok.len >= t.minLength: result.add(tok)
-          current = ""
-    if current.len > 0:
-      let tok = if t.lowercase: current.toLowerAscii() else: current
-      if tok.len >= t.minLength: result.add(tok)
+        flushToken(current, t.lowercase, t.minLength, result)
+        current = ""
+    flushToken(current, t.lowercase, t.minLength, result)
 
 proc tokenize*(t: WordTokenizer, text: string): seq[string] =
   ## Split text into alphanumeric words.
@@ -89,20 +94,27 @@ proc tokenize*(t: WhitespaceTokenizer, text: string): seq[string] =
   ## Split on whitespace.
   if text.len == 0: return
   for tok in strutils.splitWhitespace(text):
-    let tk = if t.lowercase: tok.toLowerAscii() else: tok
+    let tk = if t.lowercase: tok.toLower() else: tok
     if tk.len >= t.minLength: result.add(tk)
 
 proc tokenize*(t: NGramTokenizer, text: string): seq[string] =
   ## Produce Unicode-character n-grams (not UTF-8 byte slices).
   if t.n <= 0: return
-  let normalized = if t.lowercase: text.toLowerAscii() else: text
+  let normalized = if t.lowercase: text.toLower() else: text
   let chars = normalized.toRunes()
   if chars.len < t.n: return
-  for i in 0..(chars.len - t.n):
+  for w in windows(chars, t.n):
     var gram = newStringOfCap(t.n)
-    for j in i..<(i + t.n):
-      gram.add($chars[j])
+    for r in w:
+      gram.add($r)
     result.add(gram)
+
+proc isSentenceBoundary*(text: string, i: int): bool =
+  ## A sentence terminator (`.`, `!`, `?`) ends a sentence only when
+  ## followed by whitespace or end of input — so `"Hi."` (quote after
+  ## the stop) does not split, matching long-standing splitter behavior.
+  text[i] in {'.', '!', '?'} and
+    (i + 1 >= text.len or text[i+1] in Whitespace)
 
 proc pushSentence(current: string, t: SentenceTokenizer,
                   result: var seq[string]) =
@@ -113,34 +125,25 @@ proc pushSentence(current: string, t: SentenceTokenizer,
   else:
     result.add(stripped)
 
-proc tokenize*(t: SentenceTokenizer, text: string): seq[string] =
-  ## Split text into sentences.
-  if text.len == 0:
-    if not t.discardEmpty: result.add("")
-    return
+proc collectSentences(text: string, t: SentenceTokenizer,
+                      result: var seq[string]) =
+  ## Accumulation loop for the sentence splitter: scan, cut at each
+  ## boundary, drain any trailing fragment.
   var current = newStringOfCap(text.len)
   for i in 0 ..< text.len:
     current.add(text[i])
-    if text[i] in {'.', '!', '?'} and
-        (i + 1 >= text.len or text[i+1] in Whitespace):
+    if isSentenceBoundary(text, i):
       pushSentence(current, t, result)
       current.setLen(0)
   if current.len > 0:
     pushSentence(current, t, result)
 
-# ============================================================
-# N-grams from token sequences
-# ============================================================
-
-proc ngrams*(tokens: seq[string], n: int): seq[string] =
-  ## Generate word n-grams from a token sequence.
-  if n <= 0 or tokens.len == 0 or tokens.len < n: return
-  for i in 0..(tokens.len - n):
-    var gram = tokens[i]
-    for j in 1..<n:
-      gram.add(" ")
-      gram.add(tokens[i+j])
-    result.add(gram)
+proc tokenize*(t: SentenceTokenizer, text: string): seq[string] =
+  ## Split text into sentences.
+  if text.len == 0:
+    if not t.discardEmpty: result.add("")
+    return
+  collectSentences(text, t, result)
 
 # ============================================================
 # Convenience functions

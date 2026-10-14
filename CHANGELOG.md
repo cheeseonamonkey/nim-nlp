@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.3.0
+
+- **BREAKING**: `ngrams` now returns `seq[seq[string]]` (arrays of component
+  tokens, e.g. `@[@["the", "quick"]]`) instead of space-joined strings, and
+  lives in the new `nlp/ngrams` module alongside `bigrams`, `trigrams`, and
+  `ngramRange`. Update call sites that pinned the old joined-string shape.
+- Added n-gram analysis to `analysis`: `ngramFrequencies`, `topNgrams`,
+  `ngramCosineSimilarity` (count-bag cosine over shingles, captures word
+  order), and `ngramJaccardSimilarity`.
+- Added `nlp/distance`: rune-aware `levenshtein`, `levenshteinSimilarity`,
+  `jaro`, `jaroWinkler`, and `ngramDistance` (built on `ngramTokenize` +
+  `jaccardSimilarity`).
+- Added the `ContractionExpander` normalizer and `normalizeExpandContractions`
+  convenience (`don't` → `do not`), backed by a 93-entry table in
+  `private/lexicon.nim` (99 entries, including leading-apostrophe forms
+  like `'tis` and `'em`); whole-token matching leaves possessives and
+  `o'clock` untouched.
+- Added `nlp/hashing`: stateless `HashingVectorizer` (`newHashingVectorizer`,
+  `transform`, `transformHashing`) with optional signed (+1/-1) hashing; pairs
+  with the existing `cosineSimilarity` on `SparseVector`.
+- Exposed the generic bases and derived everything from them (no behavior
+  change): `windows`/`joinGrams` (backing `ngrams` and `NGramTokenizer`),
+  `countItems`/`cosineCounts`/`jaccardSets`/`overlapSets` (backing all
+  frequency and similarity measures), `topRanked` (backing `topScored` and
+  `topNgrams`), `levenshteinRunes`/`jaroRunes` (backing the string
+  distances), `hashBucket`/`hashSign` (backing `transform`).
+- `ngramDistance` is now case-sensitive (previously lowercased via
+  `ngramTokenize`), consistent with the word-level similarities.
+- **Fixed**: smart stemmer `measure` never returned its count (always 0),
+  so step-3/4/5 table rules, the `-eed → -ee` rewrite, final-`-e` strip,
+  and double-`l` cleanup never fired. Smart outputs change accordingly
+  (e.g. `houses` → `hous`, `-ies` plurals → `-i` like Porter: `cities` →
+  `citi`); the `cities` divergence pin in `t_edgecases` now asserts
+  convergence, while `flies` (`fli` vs `fly`) still diverges by design.
+- `Normalizer` concept + composable, nestable `TextPipeline` (`addStep`,
+  `normalize`); normalizer scanners and the smart/porter step internals
+  decomposed into named, pinned helpers (no behavior change).
+- Tokenizer, LDA, and coherence internals decomposed (`flushToken`,
+  `isSentenceBoundary`, `fitLda` phases, PMI/co-occurrence helpers;
+  no math or RNG-order change).
+- Case folding is now Unicode-aware (`unicode.toLower`) everywhere:
+  tokenizers, `Lowercaser`, contraction matching, stemmers, and stopwords.
+  ASCII behavior is unchanged; `"CAFÉ"` now folds to `"café"` (previously
+  `"cafÉ"`), so e.g. `isStopWord("À", "french")` is true. Char-level
+  ASCII fast paths that are provably ASCII-domain (contraction key
+  building, expansion capitalization) are intentionally kept.
+
 ## 0.2.3 (unreleased)
 
 - Split the coherence machinery (`coherenceUMass`, `coherenceCV`,
